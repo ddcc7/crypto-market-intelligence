@@ -5,6 +5,7 @@ import time
 import logging
 from pathlib import Path
 import json
+from crypto_analytics import CryptoAnalytics
 
 # Set up logging
 logging.basicConfig(
@@ -19,6 +20,7 @@ class CryptoDataIngestion:
         self.base_url = "https://api.coingecko.com/api/v3"
         self.output_dir = Path("data")
         self.output_dir.mkdir(exist_ok=True)
+        self.analytics = CryptoAnalytics(self.output_dir)
 
     def _make_request(self, endpoint, params=None, max_retries=3, retry_delay=60):
         """Make API request with retry logic and rate limit handling"""
@@ -76,22 +78,30 @@ class CryptoDataIngestion:
             df.to_csv(filepath, index=False)
             logging.info(f"Data saved successfully to {filepath}")
 
-            # Save latest data stats with proper type conversion
-            stats = {
-                "timestamp": timestamp,
-                "num_records": int(len(df)),
-                "currencies": df["symbol"].tolist(),
-                "total_market_cap": float(df["market_cap"].sum()),
-            }
+            # Validate and analyze the data
+            is_valid, messages = self.analytics.validate_data(df)
+            for message in messages:
+                logging.info(f"Validation: {message}")
 
-            with open(self.output_dir / "latest_stats.json", "w") as f:
-                json.dump(stats, f, indent=4)
-            logging.info("Stats saved successfully")
+            if is_valid:
+                # Calculate market statistics
+                stats = self.analytics.calculate_market_stats(df)
+                logging.info("Market statistics calculated successfully")
+
+                # Detect anomalies
+                anomalies = self.analytics.detect_anomalies(df)
+                if any(len(v) > 0 for v in anomalies.values() if isinstance(v, list)):
+                    logging.warning("Anomalies detected in market data")
+                else:
+                    logging.info("No significant anomalies detected")
+
+                # Save analytics results
+                self.analytics.save_analytics(stats, anomalies)
 
             return True
 
         except Exception as e:
-            logging.error(f"Error saving data to CSV: {str(e)}")
+            logging.error(f"Error processing data: {str(e)}")
             return False
 
 
@@ -104,12 +114,12 @@ def main():
         market_data = ingestion.get_market_data()
 
         if market_data:
-            # Save to CSV
+            # Save to CSV and perform analytics
             success = ingestion.save_to_csv(market_data, "crypto_market_data")
             if success:
-                logging.info("Data ingestion completed successfully")
+                logging.info("Data ingestion and analysis completed successfully")
             else:
-                logging.error("Failed to save data")
+                logging.error("Failed to save and analyze data")
         else:
             logging.error("Failed to fetch market data")
 
