@@ -377,3 +377,164 @@ class CryptoAnalytics:
         except Exception as e:
             logging.error(f"Error saving predictions: {str(e)}")
             return False
+
+    def calculate_wma(self, prices: pd.Series, window: int) -> pd.Series:
+        """
+        Calculate Weighted Moving Average for a given price series.
+        Recent prices have higher weights.
+
+        Args:
+            prices: Series of price data
+            window: Number of periods for moving average
+
+        Returns:
+            pd.Series: Weighted Moving Average values
+        """
+        weights = np.arange(1, window + 1)
+        wma = prices.rolling(window=window).apply(
+            lambda x: np.sum(weights * x) / weights.sum(), raw=True
+        )
+        return wma
+
+    def generate_wma_signals(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        short_window: int = 20,
+        long_window: int = 50,
+    ) -> Dict:
+        """
+        Generate trading signals using WMA crossover strategy for a specific symbol.
+
+        Args:
+            df: DataFrame with historical price data
+            symbol: Cryptocurrency symbol to analyze
+            short_window: Window for shorter WMA (default: 20)
+            long_window: Window for longer WMA (default: 50)
+
+        Returns:
+            Dict: Trading signals and performance metrics
+        """
+        if "close" not in df.columns:
+            raise ValueError("DataFrame must contain 'close' price column")
+
+        # Calculate WMAs
+        short_wma = self.calculate_wma(df["close"], short_window)
+        long_wma = self.calculate_wma(df["close"], long_window)
+
+        # Identify crossovers
+        crossovers = self.identify_crossovers(short_wma, long_wma)
+
+        # Generate signals
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
+        signals["short_wma"] = short_wma
+        signals["long_wma"] = long_wma
+        signals["signal"] = crossovers
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].cumsum()
+        signals["returns"] = signals["price"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
+
+        # Calculate performance metrics
+        total_return = (1 + signals["strategy_returns"]).prod() - 1
+        annual_return = (1 + total_return) ** (252 / len(signals)) - 1
+        sharpe_ratio = (
+            np.sqrt(252)
+            * signals["strategy_returns"].mean()
+            / signals["strategy_returns"].std()
+        )
+
+        results = {
+            "symbol": symbol,
+            "strategy": "WMA",
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {"short_window": short_window, "long_window": long_window},
+            "performance": {
+                "total_return": float(total_return),
+                "annual_return": float(annual_return),
+                "sharpe_ratio": float(sharpe_ratio),
+                "num_trades": int(abs(signals["signal"]).sum() / 2),
+            },
+            "current_position": int(signals["position"].iloc[-1]),
+            "latest_signal": {
+                "timestamp": signals.index[-1].isoformat(),
+                "price": float(signals["price"].iloc[-1]),
+                "short_wma": float(signals["short_wma"].iloc[-1]),
+                "long_wma": float(signals["long_wma"].iloc[-1]),
+                "crossover": int(signals["signal"].iloc[-1]),
+            },
+        }
+
+        return results
+
+    def compare_strategies(
+        self,
+        historical_data: Dict[str, pd.DataFrame],
+        short_window: int = 20,
+        long_window: int = 50,
+    ) -> Dict:
+        """
+        Compare SMA and WMA strategies across multiple cryptocurrencies.
+
+        Args:
+            historical_data: Dict of DataFrames with historical price data for each symbol
+            short_window: Window for shorter average (default: 20)
+            long_window: Window for longer average (default: 50)
+
+        Returns:
+            Dict: Comparison results and signals for each strategy
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {"short_window": short_window, "long_window": long_window},
+            "strategies": {"SMA": {"signals": {}}, "WMA": {"signals": {}}},
+        }
+
+        # Generate signals for each symbol and strategy
+        for symbol, df in historical_data.items():
+            try:
+                # Get SMA signals
+                sma_results = self.generate_sma_signals(
+                    df, symbol, short_window, long_window
+                )
+                results["strategies"]["SMA"]["signals"][symbol] = sma_results
+
+                # Get WMA signals
+                wma_results = self.generate_wma_signals(
+                    df, symbol, short_window, long_window
+                )
+                results["strategies"]["WMA"]["signals"][symbol] = wma_results
+
+            except Exception as e:
+                logging.error(f"Error generating signals for {symbol}: {e}")
+                continue
+
+        # Calculate strategy-level metrics
+        for strategy in ["SMA", "WMA"]:
+            signals = results["strategies"][strategy]["signals"]
+            if signals:
+                returns = [s["performance"]["total_return"] for s in signals.values()]
+                sharpe_ratios = [
+                    s["performance"]["sharpe_ratio"] for s in signals.values()
+                ]
+
+                results["strategies"][strategy]["metrics"] = {
+                    "mean_return": float(np.mean(returns)),
+                    "std_return": float(np.std(returns)),
+                    "mean_sharpe": float(np.mean(sharpe_ratios)),
+                    "best_symbol": max(
+                        signals.items(),
+                        key=lambda x: x[1]["performance"]["total_return"],
+                    )[0],
+                    "worst_symbol": min(
+                        signals.items(),
+                        key=lambda x: x[1]["performance"]["total_return"],
+                    )[0],
+                }
+
+        # Save comparison results
+        self.save_predictions(results)
+
+        return results
