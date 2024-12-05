@@ -183,3 +183,197 @@ class CryptoAnalytics:
         except Exception as e:
             logging.error(f"Error saving analytics: {str(e)}")
             return False
+
+    def calculate_sma(self, prices: pd.Series, window: int) -> pd.Series:
+        """
+        Calculate Simple Moving Average for a given price series.
+
+        Args:
+            prices: Series of price data
+            window: Number of periods for moving average
+
+        Returns:
+            pd.Series: Simple Moving Average values
+        """
+        return prices.rolling(window=window).mean()
+
+    def identify_crossovers(
+        self, short_sma: pd.Series, long_sma: pd.Series
+    ) -> pd.Series:
+        """
+        Identify crossover points between two moving averages.
+
+        Args:
+            short_sma: Shorter-term SMA series
+            long_sma: Longer-term SMA series
+
+        Returns:
+            pd.Series: 1 for bullish crossover (short crosses above long)
+                      -1 for bearish crossover (short crosses below long)
+                      0 for no crossover
+        """
+        # Previous day's position
+        prev_position = (short_sma.shift(1) > long_sma.shift(1)).astype(int)
+        # Current position
+        curr_position = (short_sma > long_sma).astype(int)
+
+        # Identify crossovers
+        crossovers = curr_position - prev_position
+
+        return crossovers
+
+    def generate_sma_signals(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        short_window: int = 20,
+        long_window: int = 50,
+    ) -> Dict:
+        """
+        Generate trading signals using SMA crossover strategy for a specific symbol.
+
+        Args:
+            df: DataFrame with historical price data
+            symbol: Cryptocurrency symbol to analyze
+            short_window: Window for shorter SMA (default: 20)
+            long_window: Window for longer SMA (default: 50)
+
+        Returns:
+            Dict: Trading signals and performance metrics
+        """
+        if "close" not in df.columns:
+            raise ValueError("DataFrame must contain 'close' price column")
+
+        # Calculate SMAs
+        short_sma = self.calculate_sma(df["close"], short_window)
+        long_sma = self.calculate_sma(df["close"], long_window)
+
+        # Identify crossovers
+        crossovers = self.identify_crossovers(short_sma, long_sma)
+
+        # Generate signals
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
+        signals["short_sma"] = short_sma
+        signals["long_sma"] = long_sma
+        signals["signal"] = crossovers
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].cumsum()
+        signals["returns"] = signals["price"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
+
+        # Calculate performance metrics
+        total_return = (1 + signals["strategy_returns"]).prod() - 1
+        annual_return = (1 + total_return) ** (252 / len(signals)) - 1
+        sharpe_ratio = (
+            np.sqrt(252)
+            * signals["strategy_returns"].mean()
+            / signals["strategy_returns"].std()
+        )
+
+        results = {
+            "symbol": symbol,
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {"short_window": short_window, "long_window": long_window},
+            "performance": {
+                "total_return": float(total_return),
+                "annual_return": float(annual_return),
+                "sharpe_ratio": float(sharpe_ratio),
+                "num_trades": int(abs(signals["signal"]).sum() / 2),
+            },
+            "current_position": int(signals["position"].iloc[-1]),
+            "latest_signal": {
+                "timestamp": signals.index[-1].isoformat(),
+                "price": float(signals["price"].iloc[-1]),
+                "short_sma": float(signals["short_sma"].iloc[-1]),
+                "long_sma": float(signals["long_sma"].iloc[-1]),
+                "crossover": int(signals["signal"].iloc[-1]),
+            },
+        }
+
+        return results
+
+    def backtest_sma_strategy(
+        self,
+        historical_data: Dict[str, pd.DataFrame],
+        short_window: int = 20,
+        long_window: int = 50,
+    ) -> Dict:
+        """
+        Backtest SMA crossover strategy across multiple cryptocurrencies.
+
+        Args:
+            historical_data: Dict of DataFrames with historical price data for each symbol
+            short_window: Window for shorter SMA (default: 20)
+            long_window: Window for longer SMA (default: 50)
+
+        Returns:
+            Dict: Backtest results and signals for each symbol
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "strategy_params": {
+                "short_window": short_window,
+                "long_window": long_window,
+            },
+            "signals": {},
+        }
+
+        # Generate signals for each symbol
+        for symbol, df in historical_data.items():
+            try:
+                symbol_results = self.generate_sma_signals(
+                    df, symbol, short_window, long_window
+                )
+                results["signals"][symbol] = symbol_results
+            except Exception as e:
+                logging.error(f"Error generating signals for {symbol}: {str(e)}")
+                continue
+
+        # Calculate portfolio-level metrics
+        portfolio_returns = []
+        for symbol in results["signals"]:
+            returns = results["signals"][symbol]["performance"]["total_return"]
+            portfolio_returns.append(returns)
+
+        if portfolio_returns:
+            results["portfolio_metrics"] = {
+                "mean_return": float(np.mean(portfolio_returns)),
+                "std_return": float(np.std(portfolio_returns)),
+                "best_symbol": max(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+                "worst_symbol": min(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+            }
+
+        # Save results
+        self.save_predictions(results)
+
+        return results
+
+    def save_predictions(self, predictions: Dict) -> bool:
+        """
+        Save trading signals and predictions to JSON file.
+
+        Args:
+            predictions: Dictionary containing prediction results
+
+        Returns:
+            bool: True if save successful, False otherwise
+        """
+        try:
+            filepath = self.output_dir / "predictions.json"
+            with open(filepath, "w") as f:
+                json.dump(predictions, f, indent=4)
+
+            logging.info(f"Predictions saved successfully to {filepath}")
+            return True
+
+        except Exception as e:
+            logging.error(f"Error saving predictions: {str(e)}")
+            return False
