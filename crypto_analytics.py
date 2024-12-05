@@ -538,3 +538,173 @@ class CryptoAnalytics:
         self.save_predictions(results)
 
         return results
+
+    def calculate_bollinger_bands(
+        self, prices: pd.Series, window: int = 20, num_std: float = 2.0
+    ) -> Tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        Calculate Bollinger Bands for a given price series.
+
+        Args:
+            prices: Series of price data
+            window: Period for moving average (default: 20)
+            num_std: Number of standard deviations for bands (default: 2.0)
+
+        Returns:
+            Tuple[pd.Series, pd.Series, pd.Series]: Upper band, middle band, lower band
+        """
+        middle_band = self.calculate_sma(prices, window)
+        rolling_std = prices.rolling(window=window).std()
+
+        upper_band = middle_band + (rolling_std * num_std)
+        lower_band = middle_band - (rolling_std * num_std)
+
+        return upper_band, middle_band, lower_band
+
+    def generate_bollinger_signals(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        window: int = 20,
+        num_std: float = 2.0,
+    ) -> Dict:
+        """
+        Generate trading signals using Bollinger Bands strategy.
+
+        Args:
+            df: DataFrame with historical price data
+            symbol: Cryptocurrency symbol to analyze
+            window: Period for moving average (default: 20)
+            num_std: Number of standard deviations for bands (default: 2.0)
+
+        Returns:
+            Dict: Trading signals and performance metrics
+        """
+        if "close" not in df.columns:
+            raise ValueError("DataFrame must contain 'close' price column")
+
+        # Calculate Bollinger Bands
+        upper_band, middle_band, lower_band = self.calculate_bollinger_bands(
+            df["close"], window, num_std
+        )
+
+        # Generate signals
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
+        signals["upper_band"] = upper_band
+        signals["middle_band"] = middle_band
+        signals["lower_band"] = lower_band
+
+        # 1 for buy (price crosses below lower band)
+        # -1 for sell (price crosses above upper band)
+        # 0 for no signal
+        signals["signal"] = 0
+        signals.loc[df["close"] < lower_band, "signal"] = 1
+        signals.loc[df["close"] > upper_band, "signal"] = -1
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].fillna(0)
+        signals["returns"] = df["close"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
+
+        # Calculate performance metrics
+        total_return = (1 + signals["strategy_returns"]).prod() - 1
+        annual_return = (1 + total_return) ** (252 / len(signals)) - 1
+        sharpe_ratio = (
+            np.sqrt(252)
+            * signals["strategy_returns"].mean()
+            / signals["strategy_returns"].std()
+        )
+
+        results = {
+            "symbol": symbol,
+            "strategy": "Bollinger Bands",
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {
+                "window": window,
+                "num_std": num_std,
+            },
+            "performance": {
+                "total_return": float(total_return),
+                "annual_return": float(annual_return),
+                "sharpe_ratio": float(sharpe_ratio),
+                "num_trades": int(abs(signals["signal"]).sum()),
+            },
+            "current_position": int(signals["position"].iloc[-1]),
+            "latest_signal": {
+                "timestamp": signals.index[-1].isoformat(),
+                "price": float(signals["price"].iloc[-1]),
+                "upper_band": float(signals["upper_band"].iloc[-1]),
+                "middle_band": float(signals["middle_band"].iloc[-1]),
+                "lower_band": float(signals["lower_band"].iloc[-1]),
+                "signal": int(signals["signal"].iloc[-1]),
+            },
+        }
+
+        return results
+
+    def backtest_bollinger_strategy(
+        self,
+        historical_data: Dict[str, pd.DataFrame],
+        window: int = 20,
+        num_std: float = 2.0,
+    ) -> Dict:
+        """
+        Backtest Bollinger Bands strategy across multiple cryptocurrencies.
+
+        Args:
+            historical_data: Dict of DataFrames with historical price data for each symbol
+            window: Period for moving average (default: 20)
+            num_std: Number of standard deviations for bands (default: 2.0)
+
+        Returns:
+            Dict: Backtest results and signals for each symbol
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "strategy": "Bollinger Bands",
+            "parameters": {
+                "window": window,
+                "num_std": num_std,
+            },
+            "signals": {},
+        }
+
+        # Generate signals for each symbol
+        for symbol, df in historical_data.items():
+            try:
+                symbol_results = self.generate_bollinger_signals(
+                    df, symbol, window, num_std
+                )
+                results["signals"][symbol] = symbol_results
+            except Exception as e:
+                logging.error(f"Error generating signals for {symbol}: {str(e)}")
+                continue
+
+        # Calculate portfolio-level metrics
+        if results["signals"]:
+            returns = [
+                s["performance"]["total_return"] for s in results["signals"].values()
+            ]
+            sharpe_ratios = [
+                s["performance"]["sharpe_ratio"] for s in results["signals"].values()
+            ]
+
+            results["portfolio_metrics"] = {
+                "mean_return": float(np.mean(returns)),
+                "std_return": float(np.std(returns)),
+                "mean_sharpe": float(np.mean(sharpe_ratios)),
+                "best_symbol": max(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+                "worst_symbol": min(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+            }
+
+        # Save results
+        self.save_predictions(results)
+
+        return results

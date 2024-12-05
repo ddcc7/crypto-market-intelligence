@@ -13,6 +13,7 @@ A Python-based system for collecting and analyzing cryptocurrency market data us
   - SMA Crossover Strategy
   - Performance Backtesting
   - Trading Signal Generation
+  - Bollinger Bands Strategy
 
 ## Setup
 
@@ -76,19 +77,29 @@ results = analytics.backtest_sma_strategy(
 # Results will be saved to data/predictions.json
 ```
 
-The strategy:
-- Calculates short and long-term Simple Moving Averages (SMA)
-- Identifies bullish (short crosses above long) and bearish (short crosses below long) signals
-- Generates trading signals and calculates performance metrics
-- Provides portfolio-level analysis across multiple cryptocurrencies
+# Bollinger Bands Strategy
+The system also implements Bollinger Bands for generating trading signals:
+
+```python
+# Run Bollinger Bands strategy
+results = analytics.backtest_bollinger_strategy(
+    historical_data,
+    window=20,       # 20-day moving average
+    num_std=2.0      # 2 standard deviations for bands
+)
+```
+
+The Bollinger Bands strategy:
+- Calculates middle band (20-day SMA by default)
+- Generates upper and lower bands (±2 standard deviations)
+- Identifies oversold (price below lower band) and overbought (price above upper band) conditions
+- Provides comprehensive performance metrics and trading signals
 
 Output includes:
-- Entry/exit signals
-- Total and annual returns
-- Sharpe ratio
-- Number of trades
-- Current positions
-- Portfolio-level metrics
+- Band values (upper, middle, lower)
+- Trading signals (-1 for sell, 1 for buy)
+- Performance metrics (returns, Sharpe ratio)
+- Portfolio-level analysis
 
 ## Project Structure
 
