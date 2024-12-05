@@ -15,6 +15,7 @@ A Python-based system for collecting and analyzing cryptocurrency market data us
   - Trading Signal Generation
   - Bollinger Bands Strategy
   - EMA Crossover Strategy
+  - Stochastic Oscillator Strategy
 
 ## Setup
 
@@ -132,6 +133,42 @@ Output includes:
 - Performance metrics (returns, Sharpe ratio)
 - Strategy comparison analytics
 - Portfolio-level analysis
+
+# Stochastic Oscillator Strategy
+The system implements Stochastic Oscillator for generating trading signals:
+
+```python
+# Run Stochastic strategy
+results = analytics.backtest_stochastic_strategy(
+    historical_data,
+    k_period=14,    # Period for %K line
+    d_period=3,     # Period for %D line
+    overbought=80,  # Overbought threshold
+    oversold=20     # Oversold threshold
+)
+
+# Compare with other strategies
+comparison = analytics.compare_all_strategies(
+    historical_data,
+    short_window=20,  # For MA strategies
+    long_window=50,
+    k_period=14,      # For Stochastic
+    d_period=3
+)
+```
+
+The Stochastic strategy:
+- Calculates %K (fast) and %D (slow) lines
+- Identifies overbought and oversold conditions
+- Generates buy signals when crossing above oversold
+- Generates sell signals when crossing below overbought
+- Provides comparison with moving average strategies
+
+Output includes:
+- %K and %D line values
+- Trading signals and positions
+- Performance metrics (returns, Sharpe ratio)
+- Strategy comparison analytics
 
 ## Project Structure
 

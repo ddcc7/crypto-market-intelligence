@@ -861,30 +861,239 @@ class CryptoAnalytics:
 
         return results
 
+    def calculate_stochastic(
+        self,
+        df: pd.DataFrame,
+        k_period: int = 14,
+        d_period: int = 3,
+        overbought: float = 80.0,
+        oversold: float = 20.0,
+    ) -> Tuple[pd.Series, pd.Series]:
+        """
+        Calculate Stochastic Oscillator (%K and %D lines).
+
+        Args:
+            df: DataFrame with high, low, close prices
+            k_period: Period for %K calculation (default: 14)
+            d_period: Period for %D calculation (default: 3)
+            overbought: Overbought threshold (default: 80)
+            oversold: Oversold threshold (default: 20)
+
+        Returns:
+            Tuple[pd.Series, pd.Series]: %K and %D lines
+        """
+        # Calculate %K
+        low_min = df["low"].rolling(window=k_period).min()
+        high_max = df["high"].rolling(window=k_period).max()
+        k_line = 100 * (df["close"] - low_min) / (high_max - low_min)
+
+        # Calculate %D (3-period SMA of %K)
+        d_line = k_line.rolling(window=d_period).mean()
+
+        return k_line, d_line
+
+    def generate_stochastic_signals(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        k_period: int = 14,
+        d_period: int = 3,
+        overbought: float = 80.0,
+        oversold: float = 20.0,
+    ) -> Dict:
+        """
+        Generate trading signals using Stochastic Oscillator.
+
+        Args:
+            df: DataFrame with historical price data
+            symbol: Cryptocurrency symbol to analyze
+            k_period: Period for %K calculation (default: 14)
+            d_period: Period for %D calculation (default: 3)
+            overbought: Overbought threshold (default: 80)
+            oversold: Oversold threshold (default: 20)
+
+        Returns:
+            Dict: Trading signals and performance metrics
+        """
+        required_columns = {"high", "low", "close"}
+        if not all(col in df.columns for col in required_columns):
+            raise ValueError(
+                "DataFrame must contain 'high', 'low', and 'close' columns"
+            )
+
+        # Calculate Stochastic Oscillator
+        k_line, d_line = self.calculate_stochastic(
+            df, k_period, d_period, overbought, oversold
+        )
+
+        # Generate signals
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
+        signals["k_line"] = k_line
+        signals["d_line"] = d_line
+
+        # Buy when both lines cross above oversold
+        # Sell when both lines cross below overbought
+        signals["signal"] = 0
+        signals.loc[
+            (k_line > oversold) & (d_line > oversold) & (k_line.shift(1) <= oversold),
+            "signal",
+        ] = 1  # Buy
+        signals.loc[
+            (k_line < overbought)
+            & (d_line < overbought)
+            & (k_line.shift(1) >= overbought),
+            "signal",
+        ] = -1  # Sell
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].cumsum()
+        signals["returns"] = signals["price"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
+
+        # Calculate performance metrics
+        total_return = (1 + signals["strategy_returns"]).prod() - 1
+        annual_return = (1 + total_return) ** (252 / len(signals)) - 1
+        sharpe_ratio = (
+            np.sqrt(252)
+            * signals["strategy_returns"].mean()
+            / signals["strategy_returns"].std()
+        )
+
+        results = {
+            "symbol": symbol,
+            "strategy": "Stochastic",
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {
+                "k_period": k_period,
+                "d_period": d_period,
+                "overbought": overbought,
+                "oversold": oversold,
+            },
+            "performance": {
+                "total_return": float(total_return),
+                "annual_return": float(annual_return),
+                "sharpe_ratio": float(sharpe_ratio),
+                "num_trades": int(abs(signals["signal"]).sum()),
+            },
+            "current_position": int(signals["position"].iloc[-1]),
+            "latest_signal": {
+                "timestamp": signals.index[-1].isoformat(),
+                "price": float(signals["price"].iloc[-1]),
+                "k_line": float(signals["k_line"].iloc[-1]),
+                "d_line": float(signals["d_line"].iloc[-1]),
+                "signal": int(signals["signal"].iloc[-1]),
+            },
+        }
+
+        return results
+
+    def backtest_stochastic_strategy(
+        self,
+        historical_data: Dict[str, pd.DataFrame],
+        k_period: int = 14,
+        d_period: int = 3,
+        overbought: float = 80.0,
+        oversold: float = 20.0,
+    ) -> Dict:
+        """
+        Backtest Stochastic Oscillator strategy across multiple cryptocurrencies.
+
+        Args:
+            historical_data: Dict of DataFrames with historical price data for each symbol
+            k_period: Period for %K calculation (default: 14)
+            d_period: Period for %D calculation (default: 3)
+            overbought: Overbought threshold (default: 80)
+            oversold: Oversold threshold (default: 20)
+
+        Returns:
+            Dict: Backtest results and signals for each symbol
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "strategy": "Stochastic",
+            "parameters": {
+                "k_period": k_period,
+                "d_period": d_period,
+                "overbought": overbought,
+                "oversold": oversold,
+            },
+            "signals": {},
+        }
+
+        # Generate signals for each symbol
+        for symbol, df in historical_data.items():
+            try:
+                symbol_results = self.generate_stochastic_signals(
+                    df, symbol, k_period, d_period, overbought, oversold
+                )
+                results["signals"][symbol] = symbol_results
+            except Exception as e:
+                logging.error(f"Error generating signals for {symbol}: {str(e)}")
+                continue
+
+        # Calculate portfolio-level metrics
+        if results["signals"]:
+            returns = [
+                s["performance"]["total_return"] for s in results["signals"].values()
+            ]
+            sharpe_ratios = [
+                s["performance"]["sharpe_ratio"] for s in results["signals"].values()
+            ]
+
+            results["portfolio_metrics"] = {
+                "mean_return": float(np.mean(returns)),
+                "std_return": float(np.std(returns)),
+                "mean_sharpe": float(np.mean(sharpe_ratios)),
+                "best_symbol": max(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+                "worst_symbol": min(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+            }
+
+        # Save results
+        self.save_predictions(results)
+
+        return results
+
     def compare_all_strategies(
         self,
         historical_data: Dict[str, pd.DataFrame],
         short_window: int = 20,
         long_window: int = 50,
+        k_period: int = 14,
+        d_period: int = 3,
     ) -> Dict:
         """
-        Compare SMA, WMA, and EMA strategies across multiple cryptocurrencies.
+        Compare SMA, WMA, EMA, and Stochastic strategies across multiple cryptocurrencies.
 
         Args:
             historical_data: Dict of DataFrames with historical price data for each symbol
             short_window: Window for shorter average (default: 20)
             long_window: Window for longer average (default: 50)
+            k_period: Period for Stochastic %K (default: 14)
+            d_period: Period for Stochastic %D (default: 3)
 
         Returns:
             Dict: Comparison results and signals for each strategy
         """
         results = {
             "timestamp": datetime.now().isoformat(),
-            "parameters": {"short_window": short_window, "long_window": long_window},
+            "parameters": {
+                "short_window": short_window,
+                "long_window": long_window,
+                "k_period": k_period,
+                "d_period": d_period,
+            },
             "strategies": {
                 "SMA": {"signals": {}},
                 "WMA": {"signals": {}},
                 "EMA": {"signals": {}},
+                "Stochastic": {"signals": {}},
             },
         }
 
@@ -909,12 +1118,18 @@ class CryptoAnalytics:
                 )
                 results["strategies"]["EMA"]["signals"][symbol] = ema_results
 
+                # Get Stochastic signals
+                stoch_results = self.generate_stochastic_signals(
+                    df, symbol, k_period, d_period
+                )
+                results["strategies"]["Stochastic"]["signals"][symbol] = stoch_results
+
             except Exception as e:
                 logging.error(f"Error generating signals for {symbol}: {e}")
                 continue
 
         # Calculate strategy-level metrics
-        for strategy in ["SMA", "WMA", "EMA"]:
+        for strategy in ["SMA", "WMA", "EMA", "Stochastic"]:
             signals = results["strategies"][strategy]["signals"]
             if signals:
                 returns = [s["performance"]["total_return"] for s in signals.values()]
