@@ -25,11 +25,25 @@ wheels/
 .installed.cfg
 *.egg
 
+# Environment and Sensitive Data
+set_env_local.sh
+.env
+*.pem
+*.key
+wallet_seeds.json
+credentials.json
+
+task_manager/*
+meta_principles/*
+pftpyclient/*
 # Logs
 *.log
+pft_cli.log
 
 # Data directory
 data/
+datadump/
+.env*
 
 # IDE
 .vscode/
