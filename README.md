@@ -14,6 +14,7 @@ A Python-based system for collecting and analyzing cryptocurrency market data us
   - Performance Backtesting
   - Trading Signal Generation
   - Bollinger Bands Strategy
+  - EMA Crossover Strategy
 
 ## Setup
 
@@ -99,6 +100,37 @@ Output includes:
 - Band values (upper, middle, lower)
 - Trading signals (-1 for sell, 1 for buy)
 - Performance metrics (returns, Sharpe ratio)
+- Portfolio-level analysis
+
+# EMA Strategy
+The system implements Exponential Moving Average (EMA) for generating trading signals:
+
+```python
+# Run EMA strategy
+results = analytics.backtest_ema_strategy(
+    historical_data,
+    short_window=20,  # 20-day short EMA
+    long_window=50    # 50-day long EMA
+)
+
+# Compare all strategies (SMA, WMA, EMA)
+comparison = analytics.compare_all_strategies(
+    historical_data,
+    short_window=20,
+    long_window=50
+)
+```
+
+The EMA strategy:
+- Calculates exponential moving averages with higher weights on recent prices
+- Identifies bullish (short crosses above long) and bearish (short crosses below long) signals
+- Provides performance comparison with SMA and WMA strategies
+- Supports multiple timeframe analysis (short/medium/long-term)
+
+Output includes:
+- Trading signals and positions
+- Performance metrics (returns, Sharpe ratio)
+- Strategy comparison analytics
 - Portfolio-level analysis
 
 ## Project Structure
