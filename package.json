@@ -1,0 +1,38 @@
+{
+    "name": "cursor-assistant",
+    "displayName": "Cursor Assistant",
+    "description": "Automate interactions with Cursor AI composer panel",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:cursor-assistant.startWatching",
+        "onCommand:cursor-assistant.stopWatching"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "cursor-assistant.startWatching",
+                "title": "Start Watching Cursor Panel"
+            },
+            {
+                "command": "cursor-assistant.stopWatching",
+                "title": "Stop Watching Cursor Panel"
+            }
+        ]
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "dependencies": {
+        "@types/node": "^22.10.1",
+        "@types/vscode": "^1.95.0",
+        "typescript": "^5.7.2"
+    }
+}

@@ -11,11 +11,14 @@ A Python-based system for collecting and analyzing cryptocurrency market data us
 - Error handling and recovery
 - Technical Analysis
   - SMA Crossover Strategy
-  - Performance Backtesting
-  - Trading Signal Generation
-  - Bollinger Bands Strategy
+  - WMA Crossover Strategy
   - EMA Crossover Strategy
+  - Bollinger Bands Strategy
   - Stochastic Oscillator Strategy
+  - Market Conditions Analysis
+    - Trend Detection
+    - Volatility Analysis
+    - Strategy Performance by Market State
 
 ## Setup
 
@@ -51,7 +54,7 @@ The script will:
 - Create detailed logs in `crypto_ingestion.log`
 
 ### Technical Analysis
-The system includes a powerful technical analysis module with SMA crossover strategy:
+The system includes a comprehensive technical analysis module with multiple strategies:
 
 ```python
 from crypto_analytics import CryptoAnalytics
@@ -69,124 +72,50 @@ historical_data = {
     "ETH": pd.DataFrame({...}),
 }
 
-# Run backtest with custom parameters
-results = analytics.backtest_sma_strategy(
+# Compare strategies under different market conditions
+results = analytics.compare_all_strategies(
     historical_data,
-    short_window=20,  # 20-day short SMA
-    long_window=50    # 50-day long SMA
-)
-
-# Results will be saved to data/predictions.json
-```
-
-# Bollinger Bands Strategy
-The system also implements Bollinger Bands for generating trading signals:
-
-```python
-# Run Bollinger Bands strategy
-results = analytics.backtest_bollinger_strategy(
-    historical_data,
-    window=20,       # 20-day moving average
-    num_std=2.0      # 2 standard deviations for bands
+    short_window=20,    # For MA strategies
+    long_window=50,     # For MA strategies
+    market_window=20    # For market condition analysis
 )
 ```
 
-The Bollinger Bands strategy:
-- Calculates middle band (20-day SMA by default)
-- Generates upper and lower bands (±2 standard deviations)
-- Identifies oversold (price below lower band) and overbought (price above upper band) conditions
-- Provides comprehensive performance metrics and trading signals
+### Market Conditions Analysis
+The system now includes advanced market condition classification and strategy evaluation:
 
-Output includes:
-- Band values (upper, middle, lower)
-- Trading signals (-1 for sell, 1 for buy)
-- Performance metrics (returns, Sharpe ratio)
-- Portfolio-level analysis
+1. Market Condition Types:
+   - Trending Up: Strong upward price movement
+   - Trending Down: Strong downward price movement
+   - Ranging: Sideways price movement
+   - Volatile: High price volatility
 
-# EMA Strategy
-The system implements Exponential Moving Average (EMA) for generating trading signals:
+2. Strategy Evaluation by Market State:
+   ```python
+   # Run market condition analysis
+   results = analytics.compare_all_strategies(historical_data)
+   
+   # Results include:
+   # - Overall strategy performance
+   # - Performance metrics by market condition
+   # - Comparative analysis across strategies
+   ```
 
-```python
-# Run EMA strategy
-results = analytics.backtest_ema_strategy(
-    historical_data,
-    short_window=20,  # 20-day short EMA
-    long_window=50    # 50-day long EMA
-)
+3. Performance Metrics:
+   - Returns (total and average)
+   - Sharpe ratios
+   - Number of trades
+   - Return volatility
+   - Market condition distribution
 
-# Compare all strategies (SMA, WMA, EMA)
-comparison = analytics.compare_all_strategies(
-    historical_data,
-    short_window=20,
-    long_window=50
-)
+Results are saved to `data/predictions.json` with detailed performance metrics for each strategy under different market conditions.
+
+## Testing
+Run the test suite:
+```bash
+python test_market_conditions.py  # Test market condition analysis
+python test_strategies.py         # Test trading strategies
 ```
-
-The EMA strategy:
-- Calculates exponential moving averages with higher weights on recent prices
-- Identifies bullish (short crosses above long) and bearish (short crosses below long) signals
-- Provides performance comparison with SMA and WMA strategies
-- Supports multiple timeframe analysis (short/medium/long-term)
-
-Output includes:
-- Trading signals and positions
-- Performance metrics (returns, Sharpe ratio)
-- Strategy comparison analytics
-- Portfolio-level analysis
-
-# Stochastic Oscillator Strategy
-The system implements Stochastic Oscillator for generating trading signals:
-
-```python
-# Run Stochastic strategy
-results = analytics.backtest_stochastic_strategy(
-    historical_data,
-    k_period=14,    # Period for %K line
-    d_period=3,     # Period for %D line
-    overbought=80,  # Overbought threshold
-    oversold=20     # Oversold threshold
-)
-
-# Compare with other strategies
-comparison = analytics.compare_all_strategies(
-    historical_data,
-    short_window=20,  # For MA strategies
-    long_window=50,
-    k_period=14,      # For Stochastic
-    d_period=3
-)
-```
-
-The Stochastic strategy:
-- Calculates %K (fast) and %D (slow) lines
-- Identifies overbought and oversold conditions
-- Generates buy signals when crossing above oversold
-- Generates sell signals when crossing below overbought
-- Provides comparison with moving average strategies
-
-Output includes:
-- %K and %D line values
-- Trading signals and positions
-- Performance metrics (returns, Sharpe ratio)
-- Strategy comparison analytics
-
-## Project Structure
-
-```
-├── crypto_data_ingestion.py   # Main data ingestion script
-├── crypto_analytics.py        # Technical analysis and signal generation
-├── requirements.txt           # Python dependencies
-├── data/                     # Directory for stored market data
-│   ├── crypto_market_data_*.csv
-│   ├── latest_stats.json
-│   └── predictions.json      # Trading signals and backtest results
-└── crypto_ingestion.log      # Execution logs
-```
-
-## Contributing
-
-Feel free to submit issues and enhancement requests.
 
 ## License
-
-[MIT License](LICENSE) 
+MIT License - see LICENSE file for details. 

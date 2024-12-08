@@ -1,10 +1,12 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Literal
 import json
 from pathlib import Path
 import logging
 from datetime import datetime
+
+MarketCondition = Literal["trending_up", "trending_down", "ranging", "volatile"]
 
 
 class CryptoAnalytics:
@@ -1060,98 +1062,288 @@ class CryptoAnalytics:
 
         return results
 
+    def classify_market_condition(
+        self,
+        df: pd.DataFrame,
+        window: int = 20,
+        volatility_threshold: float = 0.02,
+        trend_threshold: float = 0.1,
+    ) -> MarketCondition:
+        """
+        Classify market condition based on price action and volatility.
+
+        Args:
+            df: DataFrame with price data
+            window: Period for analysis (default: 20)
+            volatility_threshold: Threshold for high volatility (default: 0.02 or 2%)
+            trend_threshold: Threshold for trend determination (default: 0.1 or 10%)
+
+        Returns:
+            MarketCondition: Current market condition
+        """
+        # Calculate price changes and volatility
+        returns = df["close"].pct_change()
+        volatility = returns.rolling(window=window).std()
+
+        # Calculate trend using linear regression
+        x = np.arange(len(df[-window:]))
+        y = df["close"].values[-window:]
+        slope, _ = np.polyfit(x, y, 1)
+        price_change = (df["close"].iloc[-1] - df["close"].iloc[-window]) / df[
+            "close"
+        ].iloc[-window]
+
+        # Classify market condition
+        is_volatile = volatility.iloc[-1] > volatility_threshold
+
+        if is_volatile:
+            return "volatile"
+        elif price_change > trend_threshold:
+            return "trending_up"
+        elif price_change < -trend_threshold:
+            return "trending_down"
+        else:
+            return "ranging"
+
+    def evaluate_strategy_by_market_condition(
+        self, df: pd.DataFrame, strategy_signals: pd.DataFrame, window: int = 20
+    ) -> Dict:
+        """
+        Evaluate strategy performance under different market conditions.
+
+        Args:
+            df: DataFrame with price data
+            strategy_signals: DataFrame with strategy signals and returns
+            window: Period for market condition analysis
+
+        Returns:
+            Dict: Performance metrics by market condition
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "window": window,
+            "market_conditions": {},
+        }
+
+        # Analyze each window period
+        for i in range(window, len(df), window):
+            period_slice = slice(i - window, i)
+            period_df = df.iloc[period_slice].copy()
+            period_signals = strategy_signals.iloc[period_slice].copy()
+
+            # Skip periods with insufficient data
+            if len(period_df) < window or len(period_signals) < window:
+                continue
+
+            # Classify market condition for this period
+            condition = self.classify_market_condition(period_df, window)
+
+            # Reset position for this period
+            period_signals["position"] = period_signals["signal"].fillna(0).cumsum()
+            period_signals["returns"] = period_df["close"].pct_change().fillna(0)
+            period_signals["strategy_returns"] = (
+                period_signals["position"].shift(1) * period_signals["returns"]
+            )
+
+            # Calculate period performance
+            period_returns = period_signals["strategy_returns"].fillna(0)
+            period_return = (1 + period_returns).prod() - 1
+
+            # Calculate Sharpe ratio only if there's variance in returns
+            returns_std = period_returns.std()
+            if returns_std > 0 and not np.isnan(returns_std):
+                period_sharpe = np.sqrt(252) * period_returns.mean() / returns_std
+            else:
+                period_sharpe = 0
+
+            # Calculate number of trades in this period
+            period_trades = abs(period_signals["signal"]).sum()
+
+            # Add to results
+            if condition not in results["market_conditions"]:
+                results["market_conditions"][condition] = {
+                    "periods": 0,
+                    "total_return": 0.0,
+                    "returns": [],
+                    "sharpe_ratios": [],
+                    "trades": [],
+                    "win_rate": 0.0,
+                    "profitable_periods": 0,
+                }
+
+            results["market_conditions"][condition]["periods"] += 1
+            results["market_conditions"][condition]["returns"].append(
+                float(period_return)
+            )
+            results["market_conditions"][condition]["sharpe_ratios"].append(
+                float(period_sharpe)
+            )
+            results["market_conditions"][condition]["trades"].append(int(period_trades))
+
+            if period_return > 0:
+                results["market_conditions"][condition]["profitable_periods"] += 1
+
+        # Calculate average metrics for each condition
+        for condition in results["market_conditions"]:
+            condition_data = results["market_conditions"][condition]
+            returns = condition_data["returns"]
+            sharpe_ratios = condition_data["sharpe_ratios"]
+            trades = condition_data["trades"]
+
+            if returns:
+                condition_data["avg_return"] = float(np.mean(returns))
+                condition_data["return_std"] = float(np.std(returns))
+                condition_data["total_return"] = float(
+                    (1 + np.array(returns)).prod() - 1
+                )
+                condition_data["win_rate"] = float(
+                    condition_data["profitable_periods"] / condition_data["periods"]
+                )
+            else:
+                condition_data["avg_return"] = 0.0
+                condition_data["return_std"] = 0.0
+                condition_data["total_return"] = 0.0
+                condition_data["win_rate"] = 0.0
+
+            if sharpe_ratios:
+                valid_sharpe = [s for s in sharpe_ratios if not np.isnan(s)]
+                condition_data["avg_sharpe"] = (
+                    float(np.mean(valid_sharpe)) if valid_sharpe else 0.0
+                )
+            else:
+                condition_data["avg_sharpe"] = 0.0
+
+            if trades:
+                condition_data["avg_trades"] = float(np.mean(trades))
+                condition_data["total_trades"] = int(sum(trades))
+            else:
+                condition_data["avg_trades"] = 0.0
+                condition_data["total_trades"] = 0
+
+            # Clean up arrays to make JSON serializable
+            del condition_data["returns"]
+            del condition_data["sharpe_ratios"]
+            del condition_data["trades"]
+
+        return results
+
     def compare_all_strategies(
         self,
         historical_data: Dict[str, pd.DataFrame],
         short_window: int = 20,
         long_window: int = 50,
-        k_period: int = 14,
-        d_period: int = 3,
+        market_window: int = 20,
     ) -> Dict:
         """
-        Compare SMA, WMA, EMA, and Stochastic strategies across multiple cryptocurrencies.
+        Compare all strategies under different market conditions.
 
         Args:
-            historical_data: Dict of DataFrames with historical price data for each symbol
-            short_window: Window for shorter average (default: 20)
-            long_window: Window for longer average (default: 50)
-            k_period: Period for Stochastic %K (default: 14)
-            d_period: Period for Stochastic %D (default: 3)
+            historical_data: Dict of DataFrames with historical price data
+            short_window: Window for shorter moving averages
+            long_window: Window for longer moving averages
+            market_window: Window for market condition analysis
 
         Returns:
-            Dict: Comparison results and signals for each strategy
+            Dict: Comprehensive comparison results
         """
         results = {
             "timestamp": datetime.now().isoformat(),
             "parameters": {
                 "short_window": short_window,
                 "long_window": long_window,
-                "k_period": k_period,
-                "d_period": d_period,
+                "market_window": market_window,
             },
-            "strategies": {
-                "SMA": {"signals": {}},
-                "WMA": {"signals": {}},
-                "EMA": {"signals": {}},
-                "Stochastic": {"signals": {}},
-            },
+            "strategies": {},
         }
 
-        # Generate signals for each symbol and strategy
+        strategies = {
+            "SMA": self.generate_sma_signals,
+            "WMA": self.generate_wma_signals,
+            "EMA": self.generate_ema_signals,
+            "Bollinger": lambda df, symbol: self.generate_bollinger_signals(df, symbol),
+            "Stochastic": lambda df, symbol: self.generate_stochastic_signals(
+                df, symbol
+            ),
+        }
+
         for symbol, df in historical_data.items():
-            try:
-                # Get SMA signals
-                sma_results = self.generate_sma_signals(
-                    df, symbol, short_window, long_window
-                )
-                results["strategies"]["SMA"]["signals"][symbol] = sma_results
+            results["strategies"][symbol] = {}
 
-                # Get WMA signals
-                wma_results = self.generate_wma_signals(
-                    df, symbol, short_window, long_window
-                )
-                results["strategies"]["WMA"]["signals"][symbol] = wma_results
+            for strategy_name, strategy_func in strategies.items():
+                try:
+                    # Generate strategy signals
+                    if strategy_name in ["SMA", "WMA", "EMA"]:
+                        strategy_results = strategy_func(
+                            df, symbol, short_window, long_window
+                        )
+                    else:
+                        strategy_results = strategy_func(df, symbol)
 
-                # Get EMA signals
-                ema_results = self.generate_ema_signals(
-                    df, symbol, short_window, long_window
-                )
-                results["strategies"]["EMA"]["signals"][symbol] = ema_results
+                    # Create signals DataFrame
+                    signals = pd.DataFrame(index=df.index)
+                    signals["price"] = df["close"]
 
-                # Get Stochastic signals
-                stoch_results = self.generate_stochastic_signals(
-                    df, symbol, k_period, d_period
-                )
-                results["strategies"]["Stochastic"]["signals"][symbol] = stoch_results
+                    # Extract signals based on strategy type
+                    if strategy_name in ["SMA", "WMA", "EMA"]:
+                        # For MA strategies, we need to reconstruct the signals
+                        if strategy_name == "SMA":
+                            short_ma = self.calculate_sma(df["close"], short_window)
+                            long_ma = self.calculate_sma(df["close"], long_window)
+                        elif strategy_name == "WMA":
+                            short_ma = self.calculate_wma(df["close"], short_window)
+                            long_ma = self.calculate_wma(df["close"], long_window)
+                        else:  # EMA
+                            short_ma = self.calculate_ema(df["close"], short_window)
+                            long_ma = self.calculate_ema(df["close"], long_window)
 
-            except Exception as e:
-                logging.error(f"Error generating signals for {symbol}: {e}")
-                continue
+                        signals["signal"] = self.identify_crossovers(short_ma, long_ma)
 
-        # Calculate strategy-level metrics
-        for strategy in ["SMA", "WMA", "EMA", "Stochastic"]:
-            signals = results["strategies"][strategy]["signals"]
-            if signals:
-                returns = [s["performance"]["total_return"] for s in signals.values()]
-                sharpe_ratios = [
-                    s["performance"]["sharpe_ratio"] for s in signals.values()
-                ]
+                    elif strategy_name == "Bollinger":
+                        # For Bollinger Bands, generate signals directly
+                        upper, middle, lower = self.calculate_bollinger_bands(
+                            df["close"]
+                        )
+                        signals["signal"] = 0
+                        signals.loc[df["close"] < lower, "signal"] = 1
+                        signals.loc[df["close"] > upper, "signal"] = -1
 
-                results["strategies"][strategy]["metrics"] = {
-                    "mean_return": float(np.mean(returns)),
-                    "std_return": float(np.std(returns)),
-                    "mean_sharpe": float(np.mean(sharpe_ratios)),
-                    "best_symbol": max(
-                        signals.items(),
-                        key=lambda x: x[1]["performance"]["total_return"],
-                    )[0],
-                    "worst_symbol": min(
-                        signals.items(),
-                        key=lambda x: x[1]["performance"]["total_return"],
-                    )[0],
-                }
+                    else:  # Stochastic
+                        # For Stochastic, generate signals directly
+                        k_line, d_line = self.calculate_stochastic(df)
+                        signals["signal"] = 0
+                        signals.loc[
+                            (k_line > 20) & (d_line > 20) & (k_line.shift(1) <= 20),
+                            "signal",
+                        ] = 1
+                        signals.loc[
+                            (k_line < 80) & (d_line < 80) & (k_line.shift(1) >= 80),
+                            "signal",
+                        ] = -1
 
-        # Save comparison results
+                    # Calculate positions and returns
+                    signals["position"] = signals["signal"].fillna(0).cumsum()
+                    signals["returns"] = df["close"].pct_change().fillna(0)
+                    signals["strategy_returns"] = (
+                        signals["position"].shift(1) * signals["returns"]
+                    )
+
+                    # Evaluate strategy by market condition
+                    market_performance = self.evaluate_strategy_by_market_condition(
+                        df, signals, market_window
+                    )
+
+                    results["strategies"][symbol][strategy_name] = {
+                        "overall_performance": strategy_results["performance"],
+                        "market_condition_performance": market_performance,
+                    }
+
+                except Exception as e:
+                    logging.error(
+                        f"Error evaluating {strategy_name} for {symbol}: {str(e)}"
+                    )
+                    continue
+
+        # Save comprehensive results
         self.save_predictions(results)
 
         return results

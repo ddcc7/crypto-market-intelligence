@@ -1,0 +1,23 @@
+Stochastic Oscillator implementation commit:
+https://github.com/ddcc7/crypto-market-intelligence/commit/f72daba (December 5, 2024 23:34:43 CET)
+
+Files and functions added:
+1. crypto_analytics.py:
+   - calculate_stochastic(): Computes %K (fast) and %D (slow) lines
+   - generate_stochastic_signals(): Creates signals on crossovers
+   - compare_all_strategies(): Includes Stochastic vs MA comparison
+
+Results in predictions.json:
+Fast Stochastic (5/3):
+- Total Return: +358.14%
+- Sharpe Ratio: 1.48
+- Trading Activity: 41 signals
+- Outperformed all MA strategies
+
+Standard settings comparison:
+- Stochastic (14/3): -100.00% return, 28 trades
+- WMA: +192.55% return, 4 trades
+- EMA: +127.77% return, 4 trades
+- SMA: +150.54% return, 4 trades
+
+Implementation uses standard Stochastic Oscillator methodology with configurable %K/%D periods and overbought/oversold thresholds.
