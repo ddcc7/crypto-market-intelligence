@@ -1347,3 +1347,199 @@ class CryptoAnalytics:
         self.save_predictions(results)
 
         return results
+
+    def calculate_macd(
+        self,
+        df: pd.DataFrame,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> pd.DataFrame:
+        """
+        Calculate MACD line, Signal line, and Histogram.
+
+        Args:
+            df: DataFrame with price data
+            fast_period: Period for fast EMA (default: 12)
+            slow_period: Period for slow EMA (default: 26)
+            signal_period: Period for signal line EMA (default: 9)
+
+        Returns:
+            DataFrame with MACD indicators
+        """
+        # Calculate EMAs
+        fast_ema = df["close"].ewm(span=fast_period, adjust=False).mean()
+        slow_ema = df["close"].ewm(span=slow_period, adjust=False).mean()
+
+        # Calculate MACD line
+        macd_line = fast_ema - slow_ema
+
+        # Calculate Signal line
+        signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+
+        # Calculate Histogram
+        histogram = macd_line - signal_line
+
+        return pd.DataFrame(
+            {
+                "macd_line": macd_line,
+                "signal_line": signal_line,
+                "histogram": histogram,
+            },
+            index=df.index,
+        )
+
+    def generate_macd_signals(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> Dict:
+        """
+        Generate trading signals based on MACD crossovers.
+
+        Args:
+            df: DataFrame with price data
+            symbol: Cryptocurrency symbol
+            fast_period: Period for fast EMA
+            slow_period: Period for slow EMA
+            signal_period: Period for signal line EMA
+
+        Returns:
+            Dict with signals and performance metrics
+        """
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
+
+        # Calculate MACD indicators
+        macd_data = self.calculate_macd(df, fast_period, slow_period, signal_period)
+        signals = pd.concat([signals, macd_data], axis=1)
+
+        # Initialize signal column
+        signals["signal"] = 0
+
+        # Generate signals on crossovers
+        signals.loc[
+            (signals["macd_line"] > signals["signal_line"])
+            & (signals["macd_line"].shift(1) <= signals["signal_line"].shift(1)),
+            "signal",
+        ] = 1  # Buy signal
+
+        signals.loc[
+            (signals["macd_line"] < signals["signal_line"])
+            & (signals["macd_line"].shift(1) >= signals["signal_line"].shift(1)),
+            "signal",
+        ] = -1  # Sell signal
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].cumsum()
+        signals["returns"] = signals["price"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
+
+        # Calculate performance metrics
+        total_return = (1 + signals["strategy_returns"]).prod() - 1
+        annual_return = (1 + total_return) ** (252 / len(signals)) - 1
+        sharpe_ratio = (
+            np.sqrt(252)
+            * signals["strategy_returns"].mean()
+            / signals["strategy_returns"].std()
+        )
+
+        results = {
+            "symbol": symbol,
+            "strategy": "MACD",
+            "timestamp": datetime.now().isoformat(),
+            "parameters": {
+                "fast_period": fast_period,
+                "slow_period": slow_period,
+                "signal_period": signal_period,
+            },
+            "performance": {
+                "total_return": float(total_return),
+                "annual_return": float(annual_return),
+                "sharpe_ratio": float(sharpe_ratio),
+                "num_trades": int(abs(signals["signal"]).sum()),
+            },
+            "current_position": int(signals["position"].iloc[-1]),
+            "latest_signal": {
+                "timestamp": signals.index[-1].isoformat(),
+                "price": float(signals["price"].iloc[-1]),
+                "macd_line": float(signals["macd_line"].iloc[-1]),
+                "signal_line": float(signals["signal_line"].iloc[-1]),
+                "histogram": float(signals["histogram"].iloc[-1]),
+                "signal": int(signals["signal"].iloc[-1]),
+            },
+        }
+
+        return results
+
+    def backtest_macd_strategy(
+        self,
+        historical_data: Dict[str, pd.DataFrame],
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> Dict:
+        """
+        Backtest MACD strategy across multiple cryptocurrencies.
+
+        Args:
+            historical_data: Dict of DataFrames with historical price data
+            fast_period: Period for fast EMA
+            slow_period: Period for slow EMA
+            signal_period: Period for signal line EMA
+
+        Returns:
+            Dict with backtest results and signals
+        """
+        results = {
+            "timestamp": datetime.now().isoformat(),
+            "strategy": "MACD",
+            "parameters": {
+                "fast_period": fast_period,
+                "slow_period": slow_period,
+                "signal_period": signal_period,
+            },
+            "signals": {},
+        }
+
+        # Generate signals for each symbol
+        for symbol, df in historical_data.items():
+            try:
+                symbol_results = self.generate_macd_signals(
+                    df, symbol, fast_period, slow_period, signal_period
+                )
+                results["signals"][symbol] = symbol_results
+            except Exception as e:
+                logging.error(f"Error generating MACD signals for {symbol}: {str(e)}")
+                continue
+
+        # Calculate portfolio-level metrics
+        if results["signals"]:
+            returns = [
+                s["performance"]["total_return"] for s in results["signals"].values()
+            ]
+            sharpe_ratios = [
+                s["performance"]["sharpe_ratio"] for s in results["signals"].values()
+            ]
+
+            results["portfolio_metrics"] = {
+                "mean_return": float(np.mean(returns)),
+                "std_return": float(np.std(returns)),
+                "mean_sharpe": float(np.mean(sharpe_ratios)),
+                "best_symbol": max(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+                "worst_symbol": min(
+                    results["signals"].items(),
+                    key=lambda x: x[1]["performance"]["total_return"],
+                )[0],
+            }
+
+        # Save results
+        self.save_predictions(results)
+
+        return results
