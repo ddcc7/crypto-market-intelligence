@@ -1,38 +1,14 @@
-Market Conditions Analysis Implementation:
-https://github.com/ddcc7/crypto-market-intelligence/commit/[COMMIT_HASH]
+MACD Strategy Implementation:
+https://github.com/ddcc7/crypto-market-intelligence/commit/d1fdb2c
 
-Added to crypto_analytics.py:
-1. classify_market_condition(): Classifies market state (trending_up, trending_down, ranging, volatile)
-2. evaluate_strategy_by_market_condition(): Evaluates strategy performance in each market state
-3. compare_all_strategies(): Enhanced to analyze all strategies under different market conditions
+Added MACD functionality to crypto_analytics.py with three core functions:
+1. calculate_macd(): MACD line (EMA diff), Signal line, Histogram
+2. generate_macd_signals(): Trading signals on crossovers
+3. backtest_macd_strategy(): Multi-timeframe testing
 
-Key Features:
-- Market Classification:
-  * Uses price action and volatility metrics
-  * Linear regression for trend detection
-  * Rolling volatility for market state
-  * Adaptive thresholds for classification
+2-year backtest results (BTC, ETH, XRP):
+- Standard MACD (12/26/9): ETH best at +90.44%
+- Fast MACD (8/17/9): More trades, lower returns
+- Slow MACD (19/39/9): ETH leads at +118.24%, 0.98 Sharpe
 
-- Performance Analysis:
-  * Period-by-period evaluation
-  * Win rate and trade metrics
-  * Risk-adjusted returns (Sharpe)
-  * Market-specific statistics
-
-Test Results (2-year backtest):
-1. Trending Markets:
-   - EMA performs best (avg return: 3.50%, Sharpe: 1.32)
-   - Bollinger Bands struggle (-17.23%, Sharpe: -2.05)
-   - Moving averages show consistent performance
-
-2. Ranging Markets:
-   - Bollinger Bands excel (avg return: 2.09%, Sharpe: 0.91)
-   - Stochastic shows stability (1.48%, Sharpe: 0.77)
-   - Moving averages underperform
-
-3. Volatile Markets:
-   - All strategies show increased risk metrics
-   - EMA adapts best to volatility
-   - Position sizing becomes critical
-
-Implementation includes comprehensive testing, error handling, and detailed performance metrics saved to predictions.json. Results demonstrate the importance of strategy selection based on market conditions.
+Results in predictions.json show slow MACD's superior performance in trending markets.

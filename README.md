@@ -1,26 +1,45 @@
 # Cryptocurrency Market Intelligence System
 
-A Python-based system for collecting and analyzing cryptocurrency market data using the CoinGecko API. This project is part of a larger initiative to develop AI-driven cryptocurrency market intelligence tools.
+A modular Python-based system for analyzing cryptocurrency markets using various technical indicators and trading strategies.
+
+## Project Structure
+
+```
+crypto_analytics/
+├── src/
+│   └── crypto_analytics/
+│       ├── strategies/      # Trading strategies
+│       ├── indicators/      # Technical indicators
+│       ├── utils/          # Utility functions
+│       ├── config/         # Configuration management
+│       └── data/           # Data storage
+├── tests/                  # Test suite
+└── docs/                   # Documentation
+```
 
 ## Features
 
-- Real-time cryptocurrency market data ingestion
-- Automatic rate limit handling and retry mechanisms
-- Structured data storage in CSV format
-- Statistical summaries and logging
-- Error handling and recovery
-- Technical Analysis
-  - SMA Crossover Strategy
-  - WMA Crossover Strategy
-  - EMA Crossover Strategy
-  - Bollinger Bands Strategy
-  - Stochastic Oscillator Strategy
-  - Market Conditions Analysis
-    - Trend Detection
-    - Volatility Analysis
-    - Strategy Performance by Market State
+### Technical Indicators
+- MACD (Moving Average Convergence Divergence)
+- SMA (Simple Moving Average)
+- EMA (Exponential Moving Average)
+- Bollinger Bands
+- Stochastic Oscillator
 
-## Setup
+### Trading Strategies
+- MACD Crossover
+- Moving Average Crossover
+- Bollinger Bands Mean Reversion
+- Stochastic Oscillator
+
+### Performance Analytics
+- Total and Annual Returns
+- Sharpe Ratio
+- Maximum Drawdown
+- Win Rate
+- Portfolio Correlation Matrix
+
+## Installation
 
 1. Clone the repository:
 ```bash
@@ -41,81 +60,61 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Data Ingestion
-Run the data ingestion script:
-```bash
-python crypto_data_ingestion.py
-```
-
-The script will:
-- Fetch current market data from CoinGecko API
-- Save data to timestamped CSV files in the `data` directory
-- Generate summary statistics in `latest_stats.json`
-- Create detailed logs in `crypto_ingestion.log`
-
-### Technical Analysis
-The system includes a comprehensive technical analysis module with multiple strategies:
-
+### Basic Example
 ```python
-from crypto_analytics import CryptoAnalytics
-from pathlib import Path
+from src.crypto_analytics.strategies import MACDStrategy
+from src.crypto_analytics.utils import DataManager
+from src.crypto_analytics.config import ConfigManager
 
-# Initialize analytics
-analytics = CryptoAnalytics(output_dir=Path("data"))
+# Initialize components
+config = ConfigManager()
+data_manager = DataManager()
+strategy = MACDStrategy()
 
-# Load historical data (example format)
-historical_data = {
-    "BTC": pd.DataFrame({
-        "close": [...],  # Close prices
-        "timestamp": [...],  # Timestamps
-    }).set_index("timestamp"),
-    "ETH": pd.DataFrame({...}),
-}
-
-# Compare strategies under different market conditions
-results = analytics.compare_all_strategies(
-    historical_data,
-    short_window=20,    # For MA strategies
-    long_window=50,     # For MA strategies
-    market_window=20    # For market condition analysis
-)
+# Fetch data and run strategy
+symbols = ["BTC-USD", "ETH-USD"]
+data = data_manager.fetch_historical_data(symbols)
+results = strategy.backtest(data)
 ```
 
-### Market Conditions Analysis
-The system now includes advanced market condition classification and strategy evaluation:
+### Configuration
+The system uses a configuration file (`config.json`) for default parameters:
 
-1. Market Condition Types:
-   - Trending Up: Strong upward price movement
-   - Trending Down: Strong downward price movement
-   - Ranging: Sideways price movement
-   - Volatile: High price volatility
+```json
+{
+    "data": {
+        "historical_dir": "data/historical",
+        "results_dir": "data/results",
+        "default_period": "2y",
+        "default_interval": "1d"
+    },
+    "strategies": {
+        "macd": {
+            "default_fast_period": 12,
+            "default_slow_period": 26,
+            "default_signal_period": 9
+        }
+    }
+}
+```
 
-2. Strategy Evaluation by Market State:
-   ```python
-   # Run market condition analysis
-   results = analytics.compare_all_strategies(historical_data)
-   
-   # Results include:
-   # - Overall strategy performance
-   # - Performance metrics by market condition
-   # - Comparative analysis across strategies
-   ```
-
-3. Performance Metrics:
-   - Returns (total and average)
-   - Sharpe ratios
-   - Number of trades
-   - Return volatility
-   - Market condition distribution
-
-Results are saved to `data/predictions.json` with detailed performance metrics for each strategy under different market conditions.
+### Adding New Strategies
+1. Create a new indicator in `src/crypto_analytics/indicators/`
+2. Create a new strategy in `src/crypto_analytics/strategies/`
+3. Add tests in `tests/`
 
 ## Testing
 Run the test suite:
 ```bash
-python test_market_conditions.py  # Test market condition analysis
-python test_strategies.py         # Test trading strategies
+python -m pytest tests/
 ```
+
+## Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 MIT License - see LICENSE file for details. 

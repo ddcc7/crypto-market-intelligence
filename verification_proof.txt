@@ -1,23 +1,12 @@
-Stochastic Oscillator implementation commit:
-https://github.com/ddcc7/crypto-market-intelligence/commit/f72daba (December 5, 2024 23:34:43 CET)
+Market conditions analysis - commit c59e39a
 
-Files and functions added:
-1. crypto_analytics.py:
-   - calculate_stochastic(): Computes %K (fast) and %D (slow) lines
-   - generate_stochastic_signals(): Creates signals on crossovers
-   - compare_all_strategies(): Includes Stochastic vs MA comparison
+1. classify_market_condition() in crypto_analytics.py detects market states using price/volatility metrics
+2. Results stored in data/predictions.json
+3. Finding: EMA strategy leads in trends (+3.50%), Bollinger Bands in ranging markets (+2.09%)
 
-Results in predictions.json:
-Fast Stochastic (5/3):
-- Total Return: +358.14%
-- Sharpe Ratio: 1.48
-- Trading Activity: 41 signals
-- Outperformed all MA strategies
+MACD implementation: https://github.com/ddcc7/crypto-market-intelligence/commit/d1fdb2c
 
-Standard settings comparison:
-- Stochastic (14/3): -100.00% return, 28 trades
-- WMA: +192.55% return, 4 trades
-- EMA: +127.77% return, 4 trades
-- SMA: +150.54% return, 4 trades
+Added to crypto_analytics.py:
+calculate_macd(), generate_macd_signals(), backtest_macd_strategy()
 
-Implementation uses standard Stochastic Oscillator methodology with configurable %K/%D periods and overbought/oversold thresholds.
+Backtest results in data/predictions.json show ETH-USD +118.24% return with slow MACD (19/39/9)
