@@ -1,45 +1,77 @@
-from datetime import datetime
-import logging
-from typing import Dict, Any
-import pandas as pd
-
 from .base_strategy import BaseStrategy
-from ..indicators.macd import MACD
-from ..utils.performance_metrics import PerformanceMetrics
-from ..config.config_manager import ConfigManager
+import pandas as pd
+from typing import Dict, Any
+from datetime import datetime
+import numpy as np
+import logging
 
 
 class MACDStrategy(BaseStrategy):
     """MACD (Moving Average Convergence Divergence) trading strategy."""
 
-    def __init__(self, output_dir=None):
-        super().__init__(output_dir)
-        self.indicator = MACD()
-        self.metrics = PerformanceMetrics()
-        self.config = ConfigManager()
+    def calculate_macd(
+        self,
+        df: pd.DataFrame,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> pd.DataFrame:
+        """Calculate MACD indicators."""
+        # Calculate EMAs
+        fast_ema = df["close"].ewm(span=fast_period, adjust=False).mean()
+        slow_ema = df["close"].ewm(span=slow_period, adjust=False).mean()
+
+        # Calculate MACD line and Signal line
+        macd_line = fast_ema - slow_ema
+        signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+        histogram = macd_line - signal_line
+
+        return pd.DataFrame(
+            {
+                "macd_line": macd_line,
+                "signal_line": signal_line,
+                "histogram": histogram,
+            },
+            index=df.index,
+        )
 
     def generate_signals(
         self,
         df: pd.DataFrame,
         symbol: str,
-        fast_period: int = None,
-        slow_period: int = None,
-        signal_period: int = None,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
     ) -> Dict[str, Any]:
-        """Generate trading signals for a symbol."""
-        # Get default parameters if not provided
-        params = self.config.get_strategy_params("macd")
-        fast_period = fast_period or params.get("default_fast_period", 12)
-        slow_period = slow_period or params.get("default_slow_period", 26)
-        signal_period = signal_period or params.get("default_signal_period", 9)
+        """Generate trading signals based on MACD crossovers."""
+        signals = pd.DataFrame(index=df.index)
+        signals["price"] = df["close"]
 
-        # Generate signals using MACD indicator
-        signals = self.indicator.generate_signals(
-            df, fast_period, slow_period, signal_period
-        )
+        # Calculate MACD indicators
+        macd_data = self.calculate_macd(df, fast_period, slow_period, signal_period)
+        signals = pd.concat([signals, macd_data], axis=1)
+
+        # Generate signals on crossovers
+        signals["signal"] = 0
+        signals.loc[
+            (signals["macd_line"] > signals["signal_line"])
+            & (signals["macd_line"].shift(1) <= signals["signal_line"].shift(1)),
+            "signal",
+        ] = 1  # Buy signal
+
+        signals.loc[
+            (signals["macd_line"] < signals["signal_line"])
+            & (signals["macd_line"].shift(1) >= signals["signal_line"].shift(1)),
+            "signal",
+        ] = -1  # Sell signal
+
+        # Calculate strategy returns
+        signals["position"] = signals["signal"].cumsum()
+        signals["returns"] = signals["price"].pct_change()
+        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
 
         # Calculate performance metrics
-        performance = self.metrics.calculate_metrics(signals)
+        performance = self.calculate_performance_metrics(signals)
 
         return {
             "symbol": symbol,
@@ -65,9 +97,9 @@ class MACDStrategy(BaseStrategy):
     def backtest(
         self,
         historical_data: Dict[str, pd.DataFrame],
-        fast_period: int = None,
-        slow_period: int = None,
-        signal_period: int = None,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
     ) -> Dict[str, Any]:
         """Backtest MACD strategy across multiple cryptocurrencies."""
         results = {
@@ -94,7 +126,7 @@ class MACDStrategy(BaseStrategy):
 
         # Calculate portfolio-level metrics
         if results["signals"]:
-            results["portfolio_metrics"] = self.metrics.calculate_portfolio_metrics(
+            results["portfolio_metrics"] = self.calculate_portfolio_metrics(
                 results["signals"]
             )
 
