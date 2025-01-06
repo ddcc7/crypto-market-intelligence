@@ -1,127 +1,183 @@
-from crypto_analytics import CryptoAnalytics
+"""Tests for MACD trading strategy."""
+
+import unittest
 import pandas as pd
-import os
-from pathlib import Path
-import yfinance as yf
-from datetime import datetime, timedelta
 import numpy as np
-import logging
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+from crypto_analytics.strategies import MACDStrategy
 
 
-def prepare_historical_data():
-    """Prepare historical data for testing."""
-    data_dir = Path("data/historical")
-    os.makedirs(data_dir, exist_ok=True)
+class TestMACDStrategy(unittest.TestCase):
+    """Test cases for MACD strategy."""
 
-    # Download 2 years of data for comprehensive testing
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=730)
+    def setUp(self):
+        """Set up test data."""
+        self.strategy = MACDStrategy()
 
-    symbols = ["BTC-USD", "ETH-USD", "XRP-USD"]
-    historical_data = {}
+        # Create sample data with a clear trend for testing
+        dates = pd.date_range(start="2023-01-01", end="2023-12-31", freq="D")
+        n_points = len(dates)
 
-    for symbol in symbols:
-        try:
-            logging.info(f"Downloading {symbol} data...")
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(start=start_date, end=end_date)
+        # Create a price series with clear trends
+        trend = np.concatenate(
+            [
+                np.linspace(100, 120, n_points // 3),  # Uptrend
+                np.linspace(120, 90, n_points // 3),  # Downtrend
+                np.linspace(90, 110, n_points - 2 * (n_points // 3)),  # Recovery
+            ]
+        )
 
-            if not df.empty:
-                df = df[["Close"]].rename(columns={"Close": "close"})
-                historical_data[symbol] = df
-                logging.info(
-                    f"Successfully downloaded {len(df)} data points for {symbol}"
-                )
-            else:
-                logging.warning(f"No data found for {symbol}")
+        # Add some noise to make it more realistic
+        noise = np.random.normal(0, 1, n_points) * 0.5
+        prices = trend + noise
 
-        except Exception as e:
-            logging.error(f"Error downloading {symbol} data: {str(e)}")
-            continue
+        self.test_data = pd.DataFrame({"close": prices}, index=dates)
 
-    return historical_data
+    def test_signal_generation(self):
+        """Test signal generation."""
+        results = self.strategy.generate_signals(self.test_data)
 
+        self.assertIsInstance(results, dict)
+        self.assertIn("symbol", results)
+        self.assertIn("strategy", results)
+        self.assertIn("timestamp", results)
+        self.assertIn("parameters", results)
+        self.assertIn("performance", results)
+        self.assertIn("current_position", results)
+        self.assertIn("latest_signal", results)
 
-def print_macd_results(results: dict, period_desc: str):
-    """Print MACD strategy results in a readable format."""
-    print(f"\nMACD Strategy Results - {period_desc}")
-    print("=" * 50)
+        # Check performance metrics
+        perf = results["performance"]
+        self.assertIn("total_return", perf)
+        self.assertIn("annualized_return", perf)
+        self.assertIn("volatility", perf)
+        self.assertIn("sharpe_ratio", perf)
+        self.assertIn("max_drawdown", perf)
+        self.assertIn("win_rate", perf)
+        self.assertIn("num_trades", perf)
 
-    for symbol in results["signals"]:
-        perf = results["signals"][symbol]["performance"]
-        latest = results["signals"][symbol]["latest_signal"]
+        # Check latest signal
+        latest = results["latest_signal"]
+        self.assertIn("timestamp", latest)
+        self.assertIn("price", latest)
+        self.assertIn("macd_line", latest)
+        self.assertIn("signal_line", latest)
+        self.assertIn("histogram", latest)
+        self.assertIn("signal", latest)
+        self.assertTrue(latest["signal"] in [-1, 0, 1])
 
-        print(f"\n{symbol}:")
-        print(f"Total Return: {perf['total_return']*100:.2f}%")
-        print(f"Annual Return: {perf['annual_return']*100:.2f}%")
-        print(f"Sharpe Ratio: {perf['sharpe_ratio']:.2f}")
-        print(f"Number of Trades: {perf['num_trades']}")
+    def test_trend_following(self):
+        """Test trend following behavior."""
+        # Create trending data
+        trend_data = pd.DataFrame(
+            index=pd.date_range(start="2023-01-01", periods=100, freq="D")
+        )
 
-        print("\nLatest Signal:")
-        print(f"Price: ${latest['price']:.2f}")
-        print(f"MACD Line: {latest['macd_line']:.4f}")
-        print(f"Signal Line: {latest['signal_line']:.4f}")
-        print(f"Histogram: {latest['histogram']:.4f}")
-        print(f"Signal: {latest['signal']} (1: Buy, -1: Sell, 0: Hold)")
+        # Strong uptrend
+        trend_data["close"] = (
+            np.linspace(100, 200, 100) + np.random.normal(0, 1, 100) * 0.5
+        )
+        up_results = self.strategy.generate_signals(trend_data)
 
-    if "portfolio_metrics" in results:
-        print("\nPortfolio Metrics:")
-        metrics = results["portfolio_metrics"]
-        print(f"Mean Return: {metrics['mean_return']*100:.2f}%")
-        print(f"Return Std Dev: {metrics['std_return']*100:.2f}%")
-        print(f"Mean Sharpe: {metrics['mean_sharpe']:.2f}")
-        print(f"Best Symbol: {metrics['best_symbol']}")
-        print(f"Worst Symbol: {metrics['worst_symbol']}")
+        # Strong downtrend
+        trend_data["close"] = (
+            np.linspace(200, 100, 100) + np.random.normal(0, 1, 100) * 0.5
+        )
+        down_results = self.strategy.generate_signals(trend_data)
 
+        # Verify trend following behavior
+        self.assertGreaterEqual(
+            up_results["current_position"], 0
+        )  # Should be long or flat in uptrend
+        self.assertLessEqual(
+            down_results["current_position"], 0
+        )  # Should be short or flat in downtrend
 
-def main():
-    # Create output directory
-    output_dir = Path("data/analysis_results")
-    os.makedirs(output_dir, exist_ok=True)
+    def test_parameter_sensitivity(self):
+        """Test strategy with different parameters."""
+        # Test with faster parameters
+        fast_strategy = MACDStrategy(
+            {"fast_period": 8, "slow_period": 17, "signal_period": 9}
+        )
+        fast_results = fast_strategy.generate_signals(self.test_data)
 
-    # Initialize analyzer
-    analyzer = CryptoAnalytics(output_dir=output_dir)
+        # Test with slower parameters
+        slow_strategy = MACDStrategy(
+            {"fast_period": 19, "slow_period": 39, "signal_period": 9}
+        )
+        slow_results = slow_strategy.generate_signals(self.test_data)
 
-    # Prepare historical data
-    logging.info("Preparing historical data...")
-    historical_data = prepare_historical_data()
+        # Verify both parameter sets produce valid results
+        self.assertIsInstance(fast_results["performance"]["total_return"], float)
+        self.assertIsInstance(slow_results["performance"]["total_return"], float)
 
-    if not historical_data:
-        logging.error("No historical data available. Exiting...")
-        return
+        # Fast strategy should generate more trades
+        self.assertGreater(
+            fast_results["performance"]["num_trades"],
+            slow_results["performance"]["num_trades"],
+        )
 
-    # Test different MACD parameter combinations
-    parameter_sets = [
-        # Standard settings
-        {"fast": 12, "slow": 26, "signal": 9, "desc": "Standard (12/26/9)"},
-        # Faster response
-        {"fast": 8, "slow": 17, "signal": 9, "desc": "Fast (8/17/9)"},
-        # Slower, more stable
-        {"fast": 19, "slow": 39, "signal": 9, "desc": "Slow (19/39/9)"},
-    ]
+    def test_crossover_signals(self):
+        """Test MACD crossover signal generation."""
+        # Create data with clear crossover points
+        dates = pd.date_range(start="2023-01-01", periods=100, freq="D")
 
-    # Run backtests with different parameters
-    for params in parameter_sets:
-        logging.info(f"\nTesting MACD strategy with {params['desc']} parameters...")
-        try:
-            results = analyzer.backtest_macd_strategy(
-                historical_data,
-                fast_period=params["fast"],
-                slow_period=params["slow"],
-                signal_period=params["signal"],
-            )
-            print_macd_results(results, params["desc"])
-        except Exception as e:
-            logging.error(f"Error testing MACD strategy: {str(e)}")
-            continue
+        # Create price series with multiple trends to generate crossovers
+        prices = []
+        base = 100
 
-    logging.info(f"\nResults saved to {output_dir}/predictions.json")
+        # Uptrend
+        prices.extend(np.linspace(base, base * 1.2, 20))
+        # Consolidation
+        prices.extend([base * 1.2] * 10)
+        # Sharp downtrend
+        prices.extend(np.linspace(base * 1.2, base * 0.8, 20))
+        # Consolidation
+        prices.extend([base * 0.8] * 10)
+        # Recovery
+        prices.extend(np.linspace(base * 0.8, base * 1.1, 20))
+        # Final consolidation
+        prices.extend([base * 1.1] * 20)
+
+        # Add some noise
+        prices = np.array(prices) + np.random.normal(0, 1, len(prices)) * 0.5
+
+        crossover_data = pd.DataFrame({"close": prices}, index=dates)
+        results = self.strategy.generate_signals(crossover_data)
+
+        # Get the signals
+        signals_df = self.strategy.calculate_signals(crossover_data)
+        signals_df = self.strategy.generate_signal_rules(signals_df)
+
+        # Verify signal properties
+        self.assertTrue(any(signals_df["signal"] == 1), "Should have buy signals")
+        self.assertTrue(any(signals_df["signal"] == -1), "Should have sell signals")
+        self.assertTrue(
+            all(signals_df["signal"].isin([-1, 0, 1])), "All signals should be valid"
+        )
+
+        # Verify that signals are generated
+        self.assertGreater(
+            results["performance"]["num_trades"], 0, "Should generate trades"
+        )
+
+    def test_error_handling(self):
+        """Test error handling."""
+        # Test with missing close price
+        bad_data = pd.DataFrame({"open": [1, 2, 3]})
+        with self.assertRaises(ValueError):
+            self.strategy.generate_signals(bad_data)
+
+        # Test with empty DataFrame
+        empty_data = pd.DataFrame()
+        with self.assertRaises(ValueError):
+            self.strategy.generate_signals(empty_data)
+
+        # Test with NaN values
+        nan_data = self.test_data.copy()
+        nan_data.loc[nan_data.index[0], "close"] = np.nan
+        results = self.strategy.generate_signals(nan_data)
+        self.assertIsInstance(results["performance"]["total_return"], float)
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

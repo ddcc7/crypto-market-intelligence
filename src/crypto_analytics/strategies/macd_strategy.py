@@ -1,133 +1,71 @@
-from .base_strategy import BaseStrategy
+"""MACD trading strategy implementation."""
+
 import pandas as pd
-from typing import Dict, Any
-from datetime import datetime
-import numpy as np
-import logging
+from typing import Dict, Optional
+from .base_strategy import BaseStrategy
+from ..indicators import MACD
 
 
 class MACDStrategy(BaseStrategy):
-    """MACD (Moving Average Convergence Divergence) trading strategy."""
+    """Trading strategy based on MACD indicator."""
 
-    def calculate_macd(
-        self,
-        df: pd.DataFrame,
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> pd.DataFrame:
-        """Calculate MACD indicators."""
-        # Calculate EMAs
-        fast_ema = df["close"].ewm(span=fast_period, adjust=False).mean()
-        slow_ema = df["close"].ewm(span=slow_period, adjust=False).mean()
+    def __init__(self, params: Optional[Dict] = None):
+        """Initialize strategy with MACD indicator.
 
-        # Calculate MACD line and Signal line
-        macd_line = fast_ema - slow_ema
-        signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-        histogram = macd_line - signal_line
+        Args:
+            params: Optional parameters for MACD indicator
+        """
+        super().__init__([MACD(params)])
 
-        return pd.DataFrame(
-            {
-                "macd_line": macd_line,
-                "signal_line": signal_line,
-                "histogram": histogram,
-            },
-            index=df.index,
-        )
+    def generate_signal_rules(self, signals: pd.DataFrame) -> pd.DataFrame:
+        """Generate trading signals based on MACD.
 
-    def generate_signals(
-        self,
-        df: pd.DataFrame,
-        symbol: str,
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> Dict[str, Any]:
-        """Generate trading signals based on MACD crossovers."""
-        signals = pd.DataFrame(index=df.index)
-        signals["price"] = df["close"]
+        Args:
+            signals: DataFrame with price and indicator values
 
-        # Calculate MACD indicators
-        macd_data = self.calculate_macd(df, fast_period, slow_period, signal_period)
-        signals = pd.concat([signals, macd_data], axis=1)
+        Returns:
+            DataFrame with updated signal column
+        """
+        # Calculate trend direction using MACD line
+        signals["trend"] = signals["macd_line"].rolling(window=5).mean()
 
-        # Generate signals on crossovers
-        signals["signal"] = 0
-        signals.loc[
-            (signals["macd_line"] > signals["signal_line"])
-            & (signals["macd_line"].shift(1) <= signals["signal_line"].shift(1)),
-            "signal",
-        ] = 1  # Buy signal
+        # Generate signals based on MACD crossovers
+        crossover = signals["macd_line"] - signals["signal_line"]
+        prev_crossover = crossover.shift(1)
 
-        signals.loc[
-            (signals["macd_line"] < signals["signal_line"])
-            & (signals["macd_line"].shift(1) >= signals["signal_line"].shift(1)),
-            "signal",
-        ] = -1  # Sell signal
-
-        # Calculate strategy returns
-        signals["position"] = signals["signal"].cumsum()
-        signals["returns"] = signals["price"].pct_change()
-        signals["strategy_returns"] = signals["position"].shift(1) * signals["returns"]
-
-        # Calculate performance metrics
-        performance = self.calculate_performance_metrics(signals)
-
-        return {
-            "symbol": symbol,
-            "strategy": self.name,
-            "timestamp": datetime.now().isoformat(),
-            "parameters": {
-                "fast_period": fast_period,
-                "slow_period": slow_period,
-                "signal_period": signal_period,
-            },
-            "performance": performance,
-            "current_position": int(signals["position"].iloc[-1]),
-            "latest_signal": {
-                "timestamp": signals.index[-1].isoformat(),
-                "price": float(signals["price"].iloc[-1]),
-                "macd_line": float(signals["macd_line"].iloc[-1]),
-                "signal_line": float(signals["signal_line"].iloc[-1]),
-                "histogram": float(signals["histogram"].iloc[-1]),
-                "signal": int(signals["signal"].iloc[-1]),
-            },
-        }
-
-    def backtest(
-        self,
-        historical_data: Dict[str, pd.DataFrame],
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> Dict[str, Any]:
-        """Backtest MACD strategy across multiple cryptocurrencies."""
-        results = {
-            "timestamp": datetime.now().isoformat(),
-            "strategy": self.name,
-            "parameters": {
-                "fast_period": fast_period,
-                "slow_period": slow_period,
-                "signal_period": signal_period,
-            },
-            "signals": {},
-        }
-
-        # Generate signals for each symbol
-        for symbol, df in historical_data.items():
-            try:
-                symbol_results = self.generate_signals(
-                    df, symbol, fast_period, slow_period, signal_period
-                )
-                results["signals"][symbol] = symbol_results
-            except Exception as e:
-                logging.error(f"Error generating MACD signals for {symbol}: {str(e)}")
-                continue
-
-        # Calculate portfolio-level metrics
-        if results["signals"]:
-            results["portfolio_metrics"] = self.calculate_portfolio_metrics(
-                results["signals"]
+        # Buy signals: MACD line crosses above signal line
+        buy_signals = (
+            (crossover > 0)
+            & (prev_crossover < 0)
+            & (  # Additional conditions for stronger signals
+                (signals["histogram"] > 0)  # Positive momentum
+                | (signals["trend"] > 0)  # Uptrend
             )
+        )
+        signals.loc[buy_signals, "signal"] = 1
 
-        return results
+        # Sell signals: MACD line crosses below signal line
+        sell_signals = (
+            (crossover < 0)
+            & (prev_crossover > 0)
+            & (  # Additional conditions for stronger signals
+                (signals["histogram"] < 0)  # Negative momentum
+                | (signals["trend"] < 0)  # Downtrend
+            )
+        )
+        signals.loc[sell_signals, "signal"] = -1
+
+        # Calculate current position
+        signals["position"] = signals["signal"].cumsum()
+
+        # Exit positions on strong trend reversal
+        trend_reversal = (signals["position"] > 0) & (  # Long position
+            signals["trend"] < -signals["trend"].std()
+        ) | (  # Strong downtrend
+            signals["position"] < 0
+        ) & (  # Short position
+            signals["trend"] > signals["trend"].std()
+        )  # Strong uptrend
+        signals.loc[trend_reversal, "signal"] = -signals.loc[trend_reversal, "position"]
+
+        return signals

@@ -1,0 +1,18 @@
+{
+    "indicator_weights": {
+        "macd": 0.36724594863205595,
+        "bollinger": 0.022230615335232295
+    },
+    "entry_thresholds": {
+        "oversold": -1.6041944994195143,
+        "overbought": 1.6821353755566943
+    },
+    "exit_thresholds": {
+        "profit": 0.01013673608784484,
+        "loss": -0.021002843568874385
+    },
+    "position_size": 0.8191325451823513,
+    "stop_loss": 0.0763692852955799,
+    "take_profit": 0.027837635676619066,
+    "lookback_period": 47
+}

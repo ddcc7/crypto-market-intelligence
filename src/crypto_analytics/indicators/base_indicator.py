@@ -1,31 +1,46 @@
 from abc import ABC, abstractmethod
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class BaseIndicator(ABC):
     """Base class for all technical indicators."""
 
-    def __init__(self, name: str):
-        self.name = name
+    def __init__(self, params: Optional[Dict[str, Any]] = None):
+        """Initialize indicator with optional parameters."""
+        self.params = params or {}
 
     @abstractmethod
-    def calculate(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
-        """Calculate the indicator values."""
+    def calculate(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate the indicator values.
+
+        Args:
+            data: DataFrame with required price data
+
+        Returns:
+            DataFrame with indicator values
+        """
         pass
 
     @abstractmethod
-    def generate_signals(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
-        """Generate trading signals based on indicator values."""
+    def get_signal_thresholds(self) -> Dict[str, float]:
+        """Get indicator-specific signal thresholds.
+
+        Returns:
+            Dictionary of threshold values for signal generation
+        """
         pass
 
-    def validate_data(self, df: pd.DataFrame) -> bool:
-        """Validate input data has required columns."""
-        required_columns = ["close"]
-        return all(col in df.columns for col in required_columns)
+    def validate_data(self, data: pd.DataFrame, required_columns: list) -> None:
+        """Validate input data has required columns.
 
-    def prepare_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prepare data for indicator calculation."""
-        if not self.validate_data(df):
-            raise ValueError("DataFrame missing required columns: close")
-        return df.copy()
+        Args:
+            data: Input DataFrame
+            required_columns: List of required column names
+
+        Raises:
+            ValueError if required columns are missing
+        """
+        missing = [col for col in required_columns if col not in data.columns]
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")

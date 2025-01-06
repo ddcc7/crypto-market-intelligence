@@ -1,393 +1,401 @@
-#!/usr/bin/env python3
-"""Script to run strategy benchmarks on multiple assets."""
+"""Benchmark script for evaluating trading strategies."""
 
-import pandas as pd
-import yfinance as yf
-from datetime import datetime, timedelta
+import sys
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor
-from pathlib import Path
 import json
-from crypto_analytics.benchmark.strategy_benchmark import StrategyBenchmark
-import warnings
+import glob
+import memory_profiler
+import pandas as pd
 import numpy as np
-from functools import partial
+from datetime import datetime
+from typing import Dict, List, Any
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import itertools
+
+# Add project root to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from crypto_analytics.strategies import BreakoutStrategy, MLStrategyCombiner
 
 
-def ensure_dir(directory):
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder for numpy types."""
+
+    def default(self, obj):
+        if isinstance(
+            obj,
+            (
+                np.int_,
+                np.intc,
+                np.intp,
+                np.int8,
+                np.int16,
+                np.int32,
+                np.int64,
+                np.uint8,
+                np.uint16,
+                np.uint32,
+                np.uint64,
+            ),
+        ):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.bool_)):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        return json.JSONEncoder.default(self, obj)
+
+
+def ensure_dir(directory: str) -> None:
     """Create directory if it doesn't exist."""
     Path(directory).mkdir(parents=True, exist_ok=True)
 
 
-def get_cache_path(symbol: str, start_date: str, end_date: str) -> Path:
-    """Get path for cached data file."""
-    cache_dir = Path("data/cache")
-    ensure_dir(cache_dir)
-    cache_file = f"{symbol}_{start_date}_{end_date}.parquet"
-    return cache_dir / cache_file
-
-
-def download_data(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-    """Download historical data from Yahoo Finance with caching and optimization.
+def load_mexc_data(symbol: str) -> pd.DataFrame:
+    """Load historical crypto data from MEXC CSV files.
 
     Args:
-        symbol: Asset symbol
-        start_date: Start date (YYYY-MM-DD)
-        end_date: End date (YYYY-MM-DD)
+        symbol: Cryptocurrency symbol (e.g., 'AVAX_USDT')
 
     Returns:
         DataFrame with OHLCV data
     """
-    cache_path = get_cache_path(symbol, start_date, end_date)
+    # Construct the file path using the new naming pattern
+    symbol_lower = symbol.lower().replace("_", "")
+    file_pattern = f"data/mexc_{symbol_lower}_4h_*.csv"
 
-    # Check if cached data exists
-    if cache_path.exists():
-        # Use fastparquet engine for faster reading
-        return pd.read_parquet(cache_path, engine="fastparquet")
+    # Find the most recent file matching the pattern
+    matching_files = glob.glob(file_pattern)
+    if not matching_files:
+        raise FileNotFoundError(f"No data files found matching pattern: {file_pattern}")
 
-    # Download if not cached
-    ticker = yf.Ticker(symbol)
+    # Use the most recent file if multiple exist
+    file_path = sorted(matching_files)[-1]
 
-    # Download with progress=False to avoid printing progress bars
-    data = ticker.history(start=start_date, end=end_date, interval="1h", progress=False)
-
-    # Optimize memory usage by using appropriate dtypes
-    float_cols = ["open", "high", "low", "close"]
-    data = data.rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-    )
-
-    # Optimize dtypes
-    for col in float_cols:
-        data[col] = data[col].astype("float32")
-    data["volume"] = data["volume"].astype("int32")
-
-    # Cache the data using fastparquet
-    data.to_parquet(cache_path, engine="fastparquet", compression="snappy")
-    return data
-
-
-def prepare_data_for_timeframe(data: pd.DataFrame, timeframe: str) -> pd.DataFrame:
-    """Optimized data preparation for a specific timeframe."""
-    offset_map = {
-        "1m": "1T",
-        "5m": "5T",
-        "15m": "15T",
-        "30m": "30T",
-        "1h": "1H",
-        "4h": "4H",
-        "1d": "1D",
-        "1w": "1W",
-    }
-    offset = offset_map.get(timeframe, "1D")
-
-    # Use numpy operations for faster calculations
-    grouped = data.groupby(pd.Grouper(freq=offset))
-    resampled = pd.DataFrame(
-        {
-            "open": grouped["open"].first(),
-            "high": grouped["high"].max(),
-            "low": grouped["low"].min(),
-            "close": grouped["close"].last(),
-            "volume": grouped["volume"].sum(),
-        }
-    )
-
-    return resampled.dropna()
-
-
-def process_strategy(
-    strategy_class, data: pd.DataFrame, timeframes: list, transaction_costs: float
-):
-    """Process a single strategy across all timeframes."""
-    strategy_results = {}
-    strategy = strategy_class() if strategy_class else None
-
-    for timeframe in timeframes:
-        try:
-            # Prepare data for timeframe
-            tf_data = prepare_data_for_timeframe(data.copy(), timeframe)
-
-            if strategy_class:
-                # Generate signals for strategy
-                signals = strategy.generate_signals(tf_data)
-            else:
-                # Buy and hold strategy (always invested)
-                signals = pd.Series(1, index=tf_data.index)
-
-            # Calculate returns and costs
-            returns = tf_data["close"].pct_change()
-
-            if strategy_class:
-                # Apply transaction costs for active strategies
-                signal_changes = signals.diff().fillna(0).abs()
-                transaction_costs_returns = -signal_changes * transaction_costs
-            else:
-                # Buy and hold only pays transaction costs once at the start
-                transaction_costs_returns = pd.Series(
-                    0.0, index=returns.index, dtype="float64"
-                )
-                transaction_costs_returns.iloc[0] = -float(transaction_costs)
-
-            # Calculate metrics
-            strategy_returns = returns * signals.shift(1)
-            adjusted_returns = strategy_returns + transaction_costs_returns
-
-            metrics = calculate_metrics(adjusted_returns)
-            strategy_name = (
-                strategy.__class__.__name__ if strategy_class else "BuyAndHold"
-            )
-            strategy_results[f"{strategy_name}_{timeframe}"] = metrics
-
-        except Exception as e:
-            strategy_name = (
-                strategy.__class__.__name__ if strategy_class else "BuyAndHold"
-            )
-            print(f"Error in {strategy_name} for {timeframe}: {str(e)}")
-            continue
-
-    return strategy_results
-
-
-def calculate_metrics(returns: pd.Series) -> dict:
-    """Vectorized calculation of performance metrics."""
-    # Basic metrics
-    total_return = (1 + returns).prod() - 1
-    annual_return = (1 + total_return) ** (252 / len(returns)) - 1
-    volatility = returns.std() * np.sqrt(252)
-
-    # Use numpy for faster calculations
-    neg_returns = returns[returns < 0]
-    downside_vol = neg_returns.std() * np.sqrt(252) if len(neg_returns) > 0 else 1e-6
-
-    # Calculate drawdown using numpy operations
-    cum_returns = (1 + returns).cumprod()
-    rolling_max = np.maximum.accumulate(cum_returns)
-    drawdowns = (cum_returns - rolling_max) / rolling_max
-    max_drawdown = drawdowns.min()
-
-    # Trading metrics
-    trades = returns.diff().fillna(0).abs()
-    num_trades = (trades != 0).sum()
-    win_rate = (returns > 0).mean() if num_trades > 0 else 0
-
-    return {
-        "total_return": total_return,
-        "annual_return": annual_return,
-        "volatility": volatility,
-        "sharpe_ratio": annual_return / volatility if volatility != 0 else 0,
-        "sortino_ratio": annual_return / downside_vol if downside_vol != 0 else 0,
-        "calmar_ratio": abs(annual_return / max_drawdown) if max_drawdown != 0 else 0,
-        "max_drawdown": max_drawdown,
-        "num_trades": num_trades,
-        "win_rate": win_rate,
-    }
-
-
-def process_asset(args):
-    """Process a single asset with optimized strategy processing."""
-    symbol, start_date, end_date, timeframes, transaction_costs = args
     try:
-        print(f"Downloading data for {symbol}...")
-        data = download_data(symbol, start_date, end_date)
+        # Read CSV file
+        data = pd.read_csv(file_path)
 
-        print(f"Running benchmark for {symbol}...")
-        benchmark = StrategyBenchmark(timeframes=timeframes)
+        # Convert timestamp to datetime (already in datetime string format)
+        data["timestamp"] = pd.to_datetime(data["timestamp"])
+        data.set_index("timestamp", inplace=True)
 
-        # Process strategies in parallel
-        with ThreadPoolExecutor() as executor:
-            strategy_futures = []
+        # Ensure all required columns exist and are properly named
+        required_columns = {
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume",
+        }
 
-            # Add buy and hold strategy
-            future = executor.submit(
-                process_strategy,
-                None,  # None represents buy and hold
-                data,
-                timeframes,
-                transaction_costs,
-            )
-            strategy_futures.append(future)
+        for col in required_columns:
+            if col not in data.columns:
+                raise ValueError(f"Missing required column: {col}")
 
-            # Add active strategies
-            for strategy_class in benchmark.strategies:
-                future = executor.submit(
-                    process_strategy,
-                    strategy_class,
-                    data,
-                    timeframes,
-                    transaction_costs,
-                )
-                strategy_futures.append(future)
+        # Add price column for compatibility
+        data["price"] = data["close"]
 
-            # Combine results
-            all_results = {}
-            for future in as_completed(strategy_futures):
-                all_results.update(future.result())
+        # Sort index to ensure chronological order
+        data.sort_index(inplace=True)
 
-        # Convert results to DataFrame
-        results_df = pd.DataFrame(
-            [
-                {"asset": symbol, "strategy": strategy_name, **metrics}
-                for strategy_name, metrics in all_results.items()
-            ]
+        return data
+
+    except Exception as e:
+        raise Exception(f"Error loading data for {symbol}: {str(e)}")
+
+
+def run_strategy_benchmark(
+    strategy: Any, data: pd.DataFrame, symbol: str
+) -> Dict[str, Any]:
+    """Run performance benchmark for a strategy."""
+    try:
+        # Measure execution time
+        start_time = time.time()
+
+        # Split data for ML strategy
+        if isinstance(strategy, MLStrategyCombiner):
+            train_size = int(len(data) * 0.7)
+            train_data = data[:train_size]
+            test_data = data[train_size:]
+
+            print(f"\nTraining data shape: {train_data.shape}")
+            print(f"Test data shape: {test_data.shape}")
+            print(f"Columns: {test_data.columns.tolist()}")
+
+            # Train the model
+            strategy.train(train_data)
+
+            # Generate signals on test data
+            signals = strategy.calculate_signals(test_data)
+            print(f"\nSignals shape: {signals.shape}")
+            print(f"Signals columns: {signals.columns.tolist()}")
+
+            signals["symbol"] = symbol
+            data = test_data
+        else:
+            # Generate signals for non-ML strategies
+            signals = strategy.generate_signals(data)
+            signals["symbol"] = symbol
+
+        # Add execution metrics
+        execution_time = time.time() - start_time
+        memory_usage = memory_profiler.memory_usage(
+            (strategy.generate_signals, (data,), {}), max_usage=True
         )
 
-        # Store results in benchmark object for plotting
-        benchmark.results = {symbol: all_results}
+        # Calculate performance metrics
+        if "strategy_returns" not in signals.columns:
+            print(
+                f"\nMissing strategy_returns column. Available columns: {signals.columns.tolist()}"
+            )
+            return None
+
+        returns = signals["strategy_returns"].dropna()
+        print(f"\nNumber of returns: {len(returns)}")
+        print(f"Number of non-zero returns: {len(returns[returns != 0])}")
+
+        if len(returns) == 0:
+            performance = {
+                "total_return": 0.0,
+                "annualized_return": 0.0,
+                "sharpe_ratio": 0.0,
+                "max_drawdown": 0.0,
+                "win_rate": 0.0,
+                "num_trades": 0,
+                "avg_trade_return": 0.0,
+                "max_consecutive_losses": 0,
+            }
+        else:
+            # Calculate metrics
+            total_return = (1 + returns).prod() - 1
+            annualized_return = (1 + total_return) ** (252 / len(returns)) - 1
+
+            sharpe = (
+                returns.mean() / returns.std() * np.sqrt(252)
+                if returns.std() != 0
+                else 0
+            )
+
+            cum_returns = (1 + returns).cumprod()
+            rolling_max = cum_returns.expanding().max()
+            drawdowns = (cum_returns - rolling_max) / rolling_max
+            max_drawdown = drawdowns.min()
+
+            win_rate = (returns > 0).mean()
+            num_trades = len(signals[signals["signal"] != 0])
+
+            # Calculate average trade return
+            trade_returns = returns[signals["signal"] != 0]
+            avg_trade_return = trade_returns.mean() if len(trade_returns) > 0 else 0
+
+            # Calculate maximum consecutive losses
+            trade_results = (trade_returns > 0).astype(int)
+            loss_streaks = (trade_results != 1).astype(int)
+            max_consecutive_losses = (
+                max(
+                    sum(1 for _ in group)
+                    for key, group in itertools.groupby(loss_streaks)
+                    if key == 1
+                )
+                if len(loss_streaks) > 0
+                else 0
+            )
+
+            performance = {
+                "total_return": float(total_return),
+                "annualized_return": float(annualized_return),
+                "sharpe_ratio": float(sharpe),
+                "max_drawdown": float(max_drawdown),
+                "win_rate": float(win_rate),
+                "num_trades": int(num_trades),
+                "avg_trade_return": float(avg_trade_return),
+                "max_consecutive_losses": int(max_consecutive_losses),
+            }
+
+        # Add strategy-specific metrics
+        if isinstance(strategy, MLStrategyCombiner):
+            feature_importance = pd.DataFrame(
+                {
+                    "feature": strategy.prepare_features(data[:1]).columns,
+                    "importance": strategy.model.feature_importances_,
+                }
+            ).sort_values("importance", ascending=False)
+
+            performance.update(
+                {
+                    "top_features": feature_importance.head(10).to_dict("records"),
+                    "prediction_threshold": strategy.prediction_threshold,
+                    "lookback_period": strategy.lookback_period,
+                }
+            )
 
         return {
             "symbol": symbol,
-            "success": True,
-            "results": results_df,
-            "benchmark": benchmark,
+            "strategy_name": strategy.__class__.__name__,
+            "performance": performance,
+            "execution_time": execution_time,
+            "memory_usage": memory_usage,
+            "test_period": (
+                {"start": data.index[0].isoformat(), "end": data.index[-1].isoformat()}
+                if isinstance(strategy, MLStrategyCombiner)
+                else None
+            ),
         }
+
     except Exception as e:
-        print(f"Error processing {symbol}: {str(e)}")
-        return {"symbol": symbol, "success": False, "error": str(e)}
+        print(
+            f"Error in benchmark for {strategy.__class__.__name__} on {symbol} (4h): {str(e)}"
+        )
+        return None
 
 
-def main():
-    # Suppress warnings
-    warnings.filterwarnings("ignore")
+def run_benchmarks(symbols: List[str] = None) -> List[Dict[str, Any]]:
+    """Run comprehensive benchmarks for all strategies."""
+    if symbols is None:
+        symbols = ["AVAX_USDT"]  # Start with just AVAX for testing
 
-    start_time = time.time()
-
-    # Create timestamp for this run
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Create output directory
-    output_dir = Path(f"benchmarks/run_{timestamp}")
-    ensure_dir(output_dir)
-
-    # Define test assets
-    assets = [
-        "BTC-USD",  # Bitcoin
-        "ETH-USD",  # Ethereum
-        "BNB-USD",  # Binance Coin
-        "SOL-USD",  # Solana
-        "ADA-USD",  # Cardano
+    # Initialize strategies with optimized parameters
+    strategies = [
+        BreakoutStrategy(),
+        MLStrategyCombiner(
+            lookback_period=30,  # Increased for better trend capture
+            prediction_threshold=0.65,  # More selective signal generation
+            position_size=1.0,
+            stop_loss=0.015,  # Tighter stop loss
+            take_profit=0.035,  # Realistic take profit
+        ),
     ]
 
-    # Define parameters
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-    timeframes = ["1h", "4h", "1d"]
-    transaction_costs = 0.001  # 0.1% transaction cost
+    # Prepare benchmark tasks
+    tasks = []
+    for symbol in symbols:
+        print(f"Loading data for {symbol}...")
+        try:
+            # Load 4h data
+            data = load_mexc_data(symbol)
+            print(f"Loaded {len(data)} periods of data for {symbol}")
 
-    # Prepare arguments for parallel processing
-    process_args = [
-        (symbol, start_date, end_date, timeframes, transaction_costs)
-        for symbol in assets
-    ]
+            # Add tasks for each strategy
+            for strategy in strategies:
+                tasks.append((strategy, data, symbol))
+        except Exception as e:
+            print(f"Error loading data for {symbol}: {str(e)}")
+            continue
 
-    # Process assets in parallel using ProcessPoolExecutor
+    # Run benchmarks in parallel
     results = []
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(process_asset, args) for args in process_args]
-        for future in as_completed(futures):
-            result = future.result()
-            results.append(result)
+        futures = [executor.submit(run_strategy_benchmark, *task) for task in tasks]
 
-            if result["success"]:
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    results.append(result)
+            except Exception as e:
+                print(f"Error in benchmark task: {e}")
+
+    return results
+
+
+def print_results(results: List[Dict[str, Any]], output_dir: str) -> None:
+    """Print and save benchmark results."""
+    print("\nBenchmark Results:")
+    print("=" * 80)
+
+    # Group results by strategy and symbol
+    strategy_results = {}
+    for result in results:
+        strategy_name = result.get("strategy_name", "Unknown")
+        if strategy_name not in strategy_results:
+            strategy_results[strategy_name] = []
+        strategy_results[strategy_name].append(result)
+
+    # Print results by strategy and symbol
+    for strategy_name, strat_results in strategy_results.items():
+        print(f"\n{strategy_name}:")
+        print("-" * 40)
+
+        # Sort results by symbol
+        strat_results.sort(key=lambda x: x["symbol"])
+
+        for result in strat_results:
+            symbol = result["symbol"]
+            perf = result["performance"]
+            print(f"\n{symbol}:")
+            print(f"  Total Return: {perf['total_return']:.2%}")
+            print(f"  Annualized Return: {perf['annualized_return']:.2%}")
+            print(f"  Sharpe Ratio: {perf['sharpe_ratio']:.2f}")
+            print(f"  Max Drawdown: {perf['max_drawdown']:.2%}")
+            print(f"  Win Rate: {perf['win_rate']:.2%}")
+            print(f"  Number of Trades: {perf['num_trades']}")
+            print(f"  Execution Time: {result['execution_time']:.3f}s")
+
+    # Save results to JSON file
+    results_file = os.path.join(output_dir, "benchmark_results.json")
+    with open(results_file, "w") as f:
+        json.dump(results, f, cls=NumpyEncoder, indent=2)
+
+    # Generate markdown report
+    report_file = os.path.join(output_dir, "benchmark_report.md")
+    with open(report_file, "w") as f:
+        f.write("# Trading Strategy Benchmark Report\n\n")
+        f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+
+        for strategy_name, strat_results in strategy_results.items():
+            f.write(f"## {strategy_name}\n\n")
+
+            # Create performance comparison table
+            f.write("### Performance Metrics\n\n")
+            f.write(
+                "| Symbol | Total Return | Sharpe Ratio | Max Drawdown | Win Rate | Trades |\n"
+            )
+            f.write(
+                "|--------|--------------|--------------|--------------|-----------|--------|\n"
+            )
+
+            for result in strat_results:
                 symbol = result["symbol"]
-                benchmark = result["benchmark"]
-                # Save plots with optimized settings
-                benchmark.plot_results(
-                    symbol, save_path=str(output_dir / f"{symbol}_results.png")
+                perf = result["performance"]
+                f.write(
+                    f"| {symbol} | {perf['total_return']:.2%} | {perf['sharpe_ratio']:.2f} | "
+                    f"{perf['max_drawdown']:.2%} | {perf['win_rate']:.2%} | {perf['num_trades']} |\n"
                 )
 
-    # Combine all successful results
-    successful_results = [r for r in results if r["success"]]
-    if successful_results:
-        # Generate and save report
-        combined_report = pd.concat([r["results"] for r in successful_results])
+            f.write("\n### Execution Metrics\n\n")
+            f.write("| Symbol | Execution Time (s) | Memory Usage (MB) |\n")
+            f.write("|--------|-------------------|------------------|\n")
 
-        # Add timeframe column for better analysis
-        combined_report["timeframe"] = combined_report["strategy"].apply(
-            lambda x: x.split("_")[-1]
-        )
-        combined_report["strategy_name"] = combined_report["strategy"].apply(
-            lambda x: "_".join(x.split("_")[:-1])
-        )
-
-        # Sort by asset and timeframe for better readability
-        combined_report = combined_report.sort_values(
-            ["asset", "timeframe", "sharpe_ratio"], ascending=[True, True, False]
-        )
-
-        # Save full report
-        report_path = output_dir / "benchmark_results.csv"
-        combined_report.to_csv(report_path, index=False)
-
-        # Print summary statistics
-        print("\nTop 5 Strategy-Timeframe Combinations by Sharpe Ratio:")
-        top_5 = combined_report.nlargest(5, "sharpe_ratio")[
-            [
-                "asset",
-                "strategy_name",
-                "timeframe",
-                "total_return",
-                "annual_return",
-                "sharpe_ratio",
-                "max_drawdown",
-                "num_trades",
-                "win_rate",
-            ]
-        ]
-        print(top_5.to_string())
-        top_5.to_csv(output_dir / "top_5_sharpe.csv", index=False)
-
-        print("\nWorst 5 Strategy-Timeframe Combinations by Maximum Drawdown:")
-        worst_5 = combined_report.nlargest(5, "max_drawdown")[
-            [
-                "asset",
-                "strategy_name",
-                "timeframe",
-                "total_return",
-                "annual_return",
-                "sharpe_ratio",
-                "max_drawdown",
-                "num_trades",
-                "win_rate",
-            ]
-        ]
-        print(worst_5.to_string())
-        worst_5.to_csv(output_dir / "worst_5_drawdown.csv", index=False)
-
-        # Print buy and hold comparison
-        print("\nBuy and Hold Performance by Asset (1d timeframe):")
-        buy_hold = combined_report[
-            (combined_report["strategy_name"] == "BuyAndHold")
-            & (combined_report["timeframe"] == "1d")
-        ][["asset", "total_return", "annual_return", "sharpe_ratio", "max_drawdown"]]
-        print(buy_hold.to_string())
-        buy_hold.to_csv(output_dir / "buy_hold_performance.csv", index=False)
-
-    # Save run metadata
-    run_time = time.time() - start_time
-    metadata = {
-        "timestamp": timestamp,
-        "run_time_seconds": run_time,
-        "assets_processed": len(assets),
-        "successful_assets": len(successful_results),
-        "failed_assets": len([r for r in results if not r["success"]]),
-        "timeframes_tested": timeframes,
-        "date_range": f"{start_date} to {end_date}",
-    }
-
-    with open(output_dir / "run_metadata.json", "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    print(f"\nBenchmark completed in {run_time:.2f} seconds")
-    print(f"Results saved in: {output_dir}")
+            for result in strat_results:
+                symbol = result["symbol"]
+                f.write(
+                    f"| {symbol} | {result['execution_time']:.3f} | "
+                    f"{result['memory_usage']:.1f} |\n"
+                )
+            f.write("\n")
 
 
 if __name__ == "__main__":
-    main()
+    # Create output directory
+    timestamp = datetime.now().strftime("%y%m%d-%H%M")
+    output_dir = f"./benchmarks/benchmark-{timestamp}"
+    ensure_dir(output_dir)
+
+    # Run benchmarks
+    results = run_benchmarks(
+        symbols=["AVAX_USDT"],  # Start with just AVAX for testing
+    )
+
+    # Print and save results
+    print_results(results, output_dir)
+
+    print(f"\nBenchmark results saved to: {output_dir}")

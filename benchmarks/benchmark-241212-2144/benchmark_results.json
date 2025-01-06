@@ -1,0 +1,67 @@
+{
+  "metadata": {
+    "generated_at": "2024-12-12T21:44:33.812127",
+    "num_strategies": 1,
+    "num_symbols": 1,
+    "num_timeframes": 3
+  },
+  "results": [
+    {
+      "total_return": 0.2101969872537661,
+      "annualized_return": 152.53318568308413,
+      "volatility": 1.4655217123929394,
+      "sharpe_ratio": 104.08115034612776,
+      "max_drawdown": -0.1735185185185185,
+      "win_rate": 0.0,
+      "num_trades": 1,
+      "profit_factor": 1.667195849993048,
+      "recovery_factor": 1.2113807162970514,
+      "execution_time": 0.027083158493041992,
+      "memory_usage": 91.390625,
+      "symbol": "AVAX_USDT",
+      "timeframe": "1D",
+      "strategy": "Breakout",
+      "start_date": "2024-09-20",
+      "end_date": "2024-12-12",
+      "data_points": 84
+    },
+    {
+      "total_return": 0.0,
+      "annualized_return": 0.0,
+      "volatility": 0.0,
+      "sharpe_ratio": 0.0,
+      "max_drawdown": 0.0,
+      "win_rate": 0.0,
+      "num_trades": 0,
+      "profit_factor": 1000.0,
+      "recovery_factor": 1000.0,
+      "execution_time": 0.007768154144287109,
+      "memory_usage": 91.5625,
+      "symbol": "AVAX_USDT",
+      "timeframe": "1W",
+      "strategy": "Breakout",
+      "start_date": "2024-09-22",
+      "end_date": "2024-12-15",
+      "data_points": 13
+    },
+    {
+      "total_return": 0.7889688249400467,
+      "annualized_return": 11.841547966218084,
+      "volatility": 0.9516151483908303,
+      "sharpe_ratio": 12.44363121608772,
+      "max_drawdown": -0.25328515111695243,
+      "win_rate": 0.0,
+      "num_trades": 1,
+      "profit_factor": 1.2141792853431381,
+      "recovery_factor": 3.1149430650032324,
+      "execution_time": 0.13406896591186523,
+      "memory_usage": 92.09375,
+      "symbol": "AVAX_USDT",
+      "timeframe": "4h",
+      "strategy": "Breakout",
+      "start_date": "2024-09-20",
+      "end_date": "2024-12-12",
+      "data_points": 500
+    }
+  ]
+}

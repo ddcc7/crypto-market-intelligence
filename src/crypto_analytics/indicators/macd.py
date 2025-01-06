@@ -4,39 +4,44 @@ from .base_indicator import BaseIndicator
 
 
 class MACD(BaseIndicator):
-    """MACD (Moving Average Convergence Divergence) indicator."""
+    """Moving Average Convergence Divergence (MACD) indicator."""
 
-    def __init__(self):
-        super().__init__("MACD")
-
-    def calculate(
-        self,
-        df: pd.DataFrame,
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> pd.DataFrame:
-        """
-        Calculate MACD indicator values.
+    def __init__(self, params: Dict[str, Any] = None):
+        """Initialize MACD indicator.
 
         Args:
-            df: DataFrame with price data
-            fast_period: Period for fast EMA
-            slow_period: Period for slow EMA
-            signal_period: Period for signal line EMA
+            params: Dictionary with parameters:
+                - fast_period: Period for fast EMA (default: 12)
+                - slow_period: Period for slow EMA (default: 26)
+                - signal_period: Period for signal line (default: 9)
+        """
+        default_params = {"fast_period": 12, "slow_period": 26, "signal_period": 9}
+        super().__init__(params or default_params)
+
+    def calculate(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Calculate MACD indicator values.
+
+        Args:
+            data: DataFrame with 'close' price column
 
         Returns:
-            DataFrame with MACD indicators
+            DataFrame with columns: macd_line, signal_line, histogram
         """
-        df = self.prepare_data(df)
+        self.validate_data(data, ["close"])
 
         # Calculate EMAs
-        fast_ema = df["close"].ewm(span=fast_period, adjust=False).mean()
-        slow_ema = df["close"].ewm(span=slow_period, adjust=False).mean()
+        fast_ema = (
+            data["close"].ewm(span=self.params["fast_period"], adjust=False).mean()
+        )
+        slow_ema = (
+            data["close"].ewm(span=self.params["slow_period"], adjust=False).mean()
+        )
 
-        # Calculate MACD components
+        # Calculate MACD line and Signal line
         macd_line = fast_ema - slow_ema
-        signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+        signal_line = macd_line.ewm(
+            span=self.params["signal_period"], adjust=False
+        ).mean()
         histogram = macd_line - signal_line
 
         return pd.DataFrame(
@@ -45,54 +50,13 @@ class MACD(BaseIndicator):
                 "signal_line": signal_line,
                 "histogram": histogram,
             },
-            index=df.index,
+            index=data.index,
         )
 
-    def generate_signals(
-        self,
-        df: pd.DataFrame,
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9,
-    ) -> pd.DataFrame:
-        """
-        Generate trading signals based on MACD crossovers.
-
-        Args:
-            df: DataFrame with price data
-            fast_period: Period for fast EMA
-            slow_period: Period for slow EMA
-            signal_period: Period for signal line EMA
+    def get_signal_thresholds(self) -> Dict[str, float]:
+        """Get MACD signal thresholds.
 
         Returns:
-            DataFrame with trading signals
+            Dictionary of threshold values
         """
-        # Calculate MACD indicators
-        macd_data = self.calculate(df, fast_period, slow_period, signal_period)
-
-        # Initialize signals DataFrame
-        signals = pd.DataFrame(index=df.index)
-        signals["price"] = df["close"]
-        signals = pd.concat([signals, macd_data], axis=1)
-
-        # Generate signals on crossovers
-        signals["signal"] = 0
-
-        # Buy signals: MACD line crosses above Signal line
-        signals.loc[
-            (signals["macd_line"] > signals["signal_line"])
-            & (signals["macd_line"].shift(1) <= signals["signal_line"].shift(1)),
-            "signal",
-        ] = 1
-
-        # Sell signals: MACD line crosses below Signal line
-        signals.loc[
-            (signals["macd_line"] < signals["signal_line"])
-            & (signals["macd_line"].shift(1) >= signals["signal_line"].shift(1)),
-            "signal",
-        ] = -1
-
-        # Calculate positions
-        signals["position"] = signals["signal"].cumsum()
-
-        return signals
+        return {"zero_line": 0.0, "histogram_threshold": 0.0}

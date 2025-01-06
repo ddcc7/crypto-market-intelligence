@@ -1,0 +1,36 @@
+[
+  {
+    "symbol": "AVAX_USDT",
+    "strategy": "BreakoutStrategy",
+    "timestamp": "2024-12-12T21:59:22.204923",
+    "parameters": {},
+    "performance": {
+      "total_return": 0.0,
+      "annualized_return": 0.0,
+      "volatility": 0.0,
+      "sharpe_ratio": 0,
+      "max_drawdown": 0.0,
+      "win_rate": 0,
+      "num_trades": 0
+    },
+    "current_position": 0,
+    "latest_signal": {
+      "price": 52.22,
+      "signal": 0,
+      "high": 52.52,
+      "low": 52.1,
+      "volume": 331.83,
+      "atr": 1.9600000000000009,
+      "avg_volume": 16487.518333333323,
+      "resistance_level": null,
+      "stop_loss": null,
+      "take_profit": null,
+      "position": 0,
+      "returns": 0.0015343306482547003,
+      "strategy_returns": 0.0,
+      "timestamp": "2024-12-12T20:00:00"
+    },
+    "execution_time": 0.11916184425354004,
+    "memory_usage": 92.703125
+  }
+]

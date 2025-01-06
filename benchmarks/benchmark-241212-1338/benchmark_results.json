@@ -1,0 +1,94 @@
+{
+  "MACD": {
+    "uptrend": {
+      "total_return": -0.6434813115646831,
+      "annualized_return": -0.5103304133111042,
+      "volatility": 0.12089977559864011,
+      "sharpe_ratio": -4.221103064783889,
+      "max_drawdown": -0.6434813115646831,
+      "win_rate": 0.1477832512315271,
+      "num_trades": 203,
+      "execution_time": 0.003879070281982422,
+      "memory_usage": 92.25
+    },
+    "downtrend": {
+      "total_return": -0.6677566297368498,
+      "annualized_return": -0.5336622943062739,
+      "volatility": 0.23504105714110735,
+      "sharpe_ratio": -2.2705066969890657,
+      "max_drawdown": -0.6793104598565057,
+      "win_rate": 0.043478260869565216,
+      "num_trades": 92,
+      "execution_time": 0.0039670467376708984,
+      "memory_usage": 92.34375
+    },
+    "sideways": {
+      "total_return": -0.9342327134151613,
+      "annualized_return": -0.8480505339598762,
+      "volatility": 0.3356250918136153,
+      "sharpe_ratio": -2.526779298226097,
+      "max_drawdown": -0.9342327134151613,
+      "win_rate": 0.0859375,
+      "num_trades": 128,
+      "execution_time": 0.0028519630432128906,
+      "memory_usage": 92.375
+    },
+    "volatile": {
+      "total_return": 0.023759845348395814,
+      "annualized_return": 0.01638961054780408,
+      "volatility": 0.6153334332082039,
+      "sharpe_ratio": 0.026635332428391712,
+      "max_drawdown": -0.5182266365717353,
+      "win_rate": 0.2413793103448276,
+      "num_trades": 58,
+      "execution_time": 0.0028557777404785156,
+      "memory_usage": 92.375
+    }
+  },
+  "Bollinger": {
+    "uptrend": {
+      "total_return": -1.0,
+      "annualized_return": -1.0,
+      "volatility": 16.04014513740286,
+      "sharpe_ratio": -0.06234357553711731,
+      "max_drawdown": -1.0004614024294192,
+      "win_rate": 0.2108843537414966,
+      "num_trades": 147,
+      "execution_time": 0.0029571056365966797,
+      "memory_usage": 92.390625
+    },
+    "downtrend": {
+      "total_return": -1.000000002511779,
+      "annualized_return": -1.0,
+      "volatility": 27.09982589257024,
+      "sharpe_ratio": -0.036900606076371974,
+      "max_drawdown": -1.0214076473028026,
+      "win_rate": 0.2585034013605442,
+      "num_trades": 147,
+      "execution_time": 0.002937793731689453,
+      "memory_usage": 92.421875
+    },
+    "sideways": {
+      "total_return": 0.13785676259585333,
+      "annualized_return": 0.09352791373479374,
+      "volatility": 1.7980075187261337,
+      "sharpe_ratio": 0.052017532051844326,
+      "max_drawdown": -0.8430473368676511,
+      "win_rate": 0.47244094488188976,
+      "num_trades": 127,
+      "execution_time": 0.002990245819091797,
+      "memory_usage": 92.4375
+    },
+    "volatile": {
+      "total_return": -1.0,
+      "annualized_return": -1.0,
+      "volatility": 13.809103766396458,
+      "sharpe_ratio": -0.0724159957747174,
+      "max_drawdown": -1.115811682815353,
+      "win_rate": 0.5,
+      "num_trades": 204,
+      "execution_time": 0.0029458999633789062,
+      "memory_usage": 92.4375
+    }
+  }
+}

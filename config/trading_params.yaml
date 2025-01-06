@@ -1,0 +1,21 @@
+breakout_strategy:
+  # Strategy parameters
+  lookback_period: 6        # 1 day of 4h periods
+  volume_factor: 1.1        # Volume threshold multiplier
+  resistance_periods: 2     # 8 hours for resistance confirmation
+  
+  # Risk management
+  profit_target: 0.015     # 1.5% take profit
+  stop_loss: 0.01          # 1% stop loss
+  
+  # Trade management
+  min_bars_between_trades: 1  # Minimum periods between trades
+  max_consecutive_losses: 3   # Maximum consecutive losses before stopping
+  
+  # Volatility adjustments
+  atr_multiplier: 1.0      # ATR multiplier for trailing stop
+  min_momentum: 0.0003     # Minimum price momentum required
+  min_breakout_size: 0.15  # Minimum breakout size as multiple of ATR
+  
+  # Volume thresholds
+  volume_std_multiplier: 0.15  # Volume standard deviation multiplier
