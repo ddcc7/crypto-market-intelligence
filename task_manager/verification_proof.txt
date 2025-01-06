@@ -1,0 +1,12 @@
+Adaptive Risk Management Implementation:
+https://github.com/ddcc7/crypto-market-intelligence/commit/ab952aa
+
+Added risk_manager.py with three components:
+1. Kelly Criterion position sizing with volatility scaling
+2. Dynamic ATR-based stop-loss/take-profit levels
+3. Risk-adjusted backtesting system
+
+Backtest results in predictions.json:
+Kelly: 0.00, Pos Size: 0.04, SL/TP: 1.45%/2.90%
+Risk Ratio: 2.00, Vol Factor: 0.69
+Max DD: -11.75% (improved risk control)
